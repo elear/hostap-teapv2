@@ -761,6 +761,7 @@ static char *eap_type_text(u8 type)
 	case EAP_TYPE_PWD: return "PWD";
 	case EAP_TYPE_EKE: return "EKE";
 	case EAP_TYPE_TEAP: return "TEAP";
+	case EAP_TYPE_TEAPV2: return "TEAPV2";
 	default: return "Unknown";
 	}
 }

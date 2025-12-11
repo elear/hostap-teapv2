@@ -28,6 +28,23 @@ def int_teap_server_params(eap_teap_auth=None,
         params['eap_teap_method_sequence'] = eap_teap_method_sequence
     return params
 
+def int_teapv2_server_params(eap_teapv2_auth=None,
+                             eap_teapv2_separate_result=None,
+                             eap_teapv2_id=None,
+                             eap_teapv2_method_sequence=None):
+    params = int_eap_server_params()
+    params['eap_fast_a_id'] = "101112131415161718191a1b1c1dff00"
+    params['eap_fast_a_id_info'] = "test server 0"
+    if eap_teapv2_auth:
+        params['eap_teapv2_auth'] = eap_teapv2_auth
+    if eap_teapv2_separate_result:
+        params['eap_teapv2_separate_result'] = eap_teapv2_separate_result
+    if eap_teapv2_id:
+        params['eap_teapv2_id'] = eap_teapv2_id
+    if eap_teapv2_method_sequence:
+        params['eap_teapv2_method_sequence'] = eap_teapv2_method_sequence
+    return params
+
 def test_eap_teap_eap_mschapv2(dev, apdev):
     """EAP-TEAP with inner EAP-MSCHAPv2"""
     check_eap_capa(dev[0], "TEAP")
@@ -38,6 +55,17 @@ def test_eap_teap_eap_mschapv2(dev, apdev):
                 anonymous_identity="TEAP", password="password",
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
     eap_reauth(dev[0], "TEAP")
+
+def test_eap_teapv2_eap_mschapv2(dev, apdev):
+    """EAP-TEAPV2 with inner EAP-MSCHAPV2"""
+    check_eap_capa(dev[0], "TEAPV2")
+    check_eap_capa(dev[0], "MSCHAPV2")
+    params = int_teapv2_server_params()
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
+    eap_reauth(dev[0], "TEAPV2")
 
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""

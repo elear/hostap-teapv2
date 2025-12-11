@@ -2532,6 +2532,24 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "eap_teap_method_sequence") == 0) {
 		bss->eap_teap_method_sequence = atoi(pos);
 #endif /* EAP_SERVER_TEAP */
+#ifdef EAP_SERVER_TEAPV2
+	} else if (os_strcmp(buf, "eap_teapv2_auth") == 0) {
+		int val = atoi(pos);
+
+		if (val < 0 || val > 2) {
+			wpa_printf(MSG_ERROR,
+				   "Line %d: Invalid eap_teapv2_auth value",
+				   line);
+			return 1;
+		}
+		bss->eap_teapv2_auth = val;
+	} else if (os_strcmp(buf, "eap_teapv2_separate_result") == 0) {
+		bss->eap_teapv2_separate_result = atoi(pos);
+	} else if (os_strcmp(buf, "eap_teapv2_id") == 0) {
+		bss->eap_teapv2_id = atoi(pos);
+	} else if (os_strcmp(buf, "eap_teapv2_method_sequence") == 0) {
+		bss->eap_teapv2_method_sequence = atoi(pos);
+#endif /* EAP_SERVER_TEAPV2 */
 #ifdef EAP_SERVER_SIM
 	} else if (os_strcmp(buf, "eap_sim_db") == 0) {
 		os_free(bss->eap_sim_db);

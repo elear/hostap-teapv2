@@ -60,7 +60,9 @@
 
 #if defined(EAP_FAST) || defined(EAP_FAST_DYNAMIC) || \
 	defined(EAP_SERVER_FAST) || defined(EAP_TEAP) || \
-	defined(EAP_SERVER_TEAP)
+	defined(EAP_TEAP_DYNAMIC) || defined(EAP_SERVER_TEAP) || \
+	defined(EAP_TEAPV2) || defined(EAP_TEAPV2_DYNAMIC) || \
+	defined(EAP_SERVER_TEAPV2)
 #define EAP_FAST_OR_TEAP
 #endif
 

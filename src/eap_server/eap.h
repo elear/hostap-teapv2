@@ -208,6 +208,17 @@ struct eap_config {
 		EAP_TEAP_ID_REQUIRE_USER_AND_MACHINE = 5,
 	} eap_teap_id;
 	int eap_teap_method_sequence;
+	int eap_teapv2_auth;
+	int eap_teapv2_separate_result;
+	enum eap_teapv2_id {
+		EAP_TEAPV2_ID_ALLOW_ANY = 0,
+		EAP_TEAPV2_ID_REQUIRE_USER = 1,
+		EAP_TEAPV2_ID_REQUIRE_MACHINE = 2,
+		EAP_TEAPV2_ID_REQUEST_USER_ACCEPT_MACHINE = 3,
+		EAP_TEAPV2_ID_REQUEST_MACHINE_ACCEPT_USER = 4,
+		EAP_TEAPV2_ID_REQUIRE_USER_AND_MACHINE = 5,
+	} eap_teapv2_id;
+	int eap_teapv2_method_sequence;
 
 	/**
 	 * eap_sim_aka_result_ind - EAP-SIM/AKA protected success indication
