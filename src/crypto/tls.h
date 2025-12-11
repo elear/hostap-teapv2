@@ -690,4 +690,6 @@ const char * tls_connection_get_peer_subject(struct tls_connection *conn);
  */
 bool tls_connection_get_own_cert_used(struct tls_connection *conn);
 
+struct wpabuf * tls_connection_get_own_cert(struct tls_connection *conn);
+
 #endif /* TLS_H */

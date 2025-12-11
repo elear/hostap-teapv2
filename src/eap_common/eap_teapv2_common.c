@@ -455,7 +455,7 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 	case TEAPV2_TLV_REQUEST_ACTION:
 		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Request-Action TLV",
 			    pos, len);
-		if (tlv->request_action) {
+		if (tlv->request_action_tlv) {
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: More than one Request-Action TLV in the message");
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
@@ -469,6 +469,11 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 		}
 		tlv->request_action_status = pos[0];
 		tlv->request_action = pos[1];
+		if (len >= 4)
+			tlv->request_action_tlvs_type =
+				WPA_GET_BE16(pos + 2) & TEAPV2_TLV_TYPE_MASK;
+		tlv->request_action_tlv = pos;
+		tlv->request_action_tlv_len = len;
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Request-Action: Status=%u Action=%u",
 			   tlv->request_action_status, tlv->request_action);
@@ -567,6 +572,40 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 		}
 		tlv->basic_auth_resp = pos;
 		tlv->basic_auth_resp_len = len;
+		break;
+	case TEAPV2_TLV_PKCS7:
+		if (tlv->pkcs7) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: More than one PKCS#7 TLV in the message");
+			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			return -2;
+		}
+		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: PKCS#7 TLV", pos, len);
+		tlv->pkcs7 = pos;
+		tlv->pkcs7_len = len;
+		break;
+	case TEAPV2_TLV_PKCS10:
+		if (tlv->pkcs10) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: More than one PKCS#10 TLV in the message");
+			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			return -2;
+		}
+		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: PKCS#10 TLV", pos, len);
+		tlv->pkcs10 = pos;
+		tlv->pkcs10_len = len;
+		break;
+	case TEAPV2_TLV_TRUSTED_SERVER_ROOT:
+		if (tlv->trusted_server_root) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: More than one Trusted-Server-Root TLV in the message");
+			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			return -2;
+		}
+		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Trusted-Server-Root TLV",
+			   pos, len);
+		tlv->trusted_server_root = pos;
+		tlv->trusted_server_root_len = len;
 		break;
 	default:
 		/* Unknown TLV */

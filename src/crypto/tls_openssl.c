@@ -6237,3 +6237,33 @@ bool tls_connection_get_own_cert_used(struct tls_connection *conn)
 		return SSL_get_certificate(conn->ssl) != NULL;
 	return false;
 }
+
+
+struct wpabuf * tls_connection_get_own_cert(struct tls_connection *conn)
+{
+#if defined(EAP_FAST_OR_TEAP) || defined(CONFIG_SAE_PK)
+	X509 *cert;
+	int len;
+	unsigned char *buf = NULL;
+	struct wpabuf *res = NULL;
+
+	if (!conn)
+		return NULL;
+
+	cert = SSL_get_certificate(conn->ssl);
+	if (!cert)
+		return NULL;
+
+	len = i2d_X509(cert, &buf);
+	if (len <= 0 || !buf)
+		return NULL;
+
+	res = wpabuf_alloc_copy(buf, len);
+	OPENSSL_free(buf);
+
+	return res;
+#else
+	(void) conn;
+	return NULL;
+#endif /* EAP_FAST_OR_TEAP || CONFIG_SAE_PK */
+}

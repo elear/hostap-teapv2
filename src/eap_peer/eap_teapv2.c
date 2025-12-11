@@ -9,11 +9,13 @@
 #include "includes.h"
 
 #include "common.h"
+#include "crypto/crypto.h"
 #include "crypto/tls.h"
 #include "eap_common/eap_teapv2_common.h"
 #include "eap_i.h"
 #include "eap_tls_common.h"
 #include "eap_config.h"
+#include "tls/x509v3.h"
 
 
 static void eap_teapv2_deinit(struct eap_sm *sm, void *priv);
@@ -63,6 +65,271 @@ struct eap_teapv2_data {
 	} teapv2_compat;
 };
 
+static struct eap_peer_cert_config *
+eap_teapv2_current_cert_config(struct eap_sm *sm)
+{
+	struct eap_peer_config *config = eap_get_config(sm);
+
+	if (!config)
+		return NULL;
+
+	if (sm->use_machine_cred)
+		return &config->machine_cert;
+
+	return &config->cert;
+}
+
+
+static int eap_teapv2_store_blob(struct eap_sm *sm,
+				 struct eap_peer_cert_config *cert,
+				 const char *purpose, const u8 *data,
+				 size_t len, char **dst)
+{
+	struct wpa_config_blob *blob;
+	char name[64];
+	char *ref = NULL;
+
+	if (!sm || !cert || !purpose || !data || !dst)
+		return -1;
+
+	blob = os_zalloc(sizeof(*blob));
+	if (!blob)
+		return -1;
+
+	os_snprintf(name, sizeof(name), "teapv2-%s-%p", purpose, cert);
+	blob->name = os_strdup(name);
+	blob->data = os_memdup(data, len);
+	if (!blob->name || !blob->data) {
+		os_free(blob->name);
+		os_free(blob->data);
+		os_free(blob);
+		return -1;
+	}
+	blob->len = len;
+
+	ref = os_malloc(7 + os_strlen(name) + 1);
+	if (!ref) {
+		os_free(blob->name);
+		os_free(blob->data);
+		os_free(blob);
+		return -1;
+	}
+	os_snprintf(ref, 7 + os_strlen(name) + 1, "blob://%s", name);
+
+	eap_set_config_blob(sm, blob);
+
+	os_free(*dst);
+	*dst = ref;
+	return 0;
+}
+
+
+static int eap_teapv2_set_csr_subject_from_cert(struct crypto_csr *csr,
+						struct x509_certificate *cert)
+{
+	size_t i;
+	bool added = false;
+
+	if (!csr || !cert)
+		return -1;
+
+	for (i = 0; i < cert->subject.num_attr; i++) {
+		enum crypto_csr_name name;
+		const struct x509_name_attr *attr = &cert->subject.attr[i];
+
+		if (!attr->value)
+			continue;
+
+		switch (attr->type) {
+		case X509_NAME_ATTR_CN:
+			name = CSR_NAME_CN;
+			break;
+		case X509_NAME_ATTR_C:
+			name = CSR_NAME_C;
+			break;
+		case X509_NAME_ATTR_O:
+			name = CSR_NAME_O;
+			break;
+		case X509_NAME_ATTR_OU:
+			name = CSR_NAME_OU;
+			break;
+		case X509_NAME_ATTR_ST:
+			name = CSR_NAME_SN;
+			break;
+		default:
+			continue;
+		}
+
+		if (crypto_csr_set_name(csr, name, attr->value) < 0)
+			return -1;
+		added = true;
+	}
+
+	return added ? 0 : -1;
+}
+
+
+static int eap_teapv2_set_csr_subject_from_identity(struct eap_sm *sm,
+						    struct crypto_csr *csr)
+{
+	const u8 *identity = NULL;
+	size_t identity_len = 0;
+	struct eap_peer_config *config = eap_get_config(sm);
+	char *tmp;
+	int ret;
+
+	if (sm->identity) {
+		identity = sm->identity;
+		identity_len = sm->identity_len;
+	} else if (config && config->identity && config->identity_len) {
+		identity = config->identity;
+		identity_len = config->identity_len;
+	}
+
+	if (!identity || !identity_len)
+		return -1;
+
+	tmp = os_malloc(identity_len + 1);
+	if (!tmp)
+		return -1;
+	os_memcpy(tmp, identity, identity_len);
+	tmp[identity_len] = '\0';
+
+	ret = crypto_csr_set_name(csr, CSR_NAME_CN, tmp);
+	os_free(tmp);
+	return ret;
+}
+
+
+static int eap_teapv2_populate_csr_subject(struct eap_sm *sm,
+					   struct crypto_csr *csr,
+					   struct x509_certificate *cert)
+{
+	if (eap_teapv2_set_csr_subject_from_cert(csr, cert) == 0)
+		return 0;
+
+	if (eap_teapv2_set_csr_subject_from_identity(sm, csr) == 0)
+		return 0;
+
+	return -1;
+}
+
+
+static struct wpabuf *
+eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
+{
+	struct crypto_ec_key *key = NULL;
+	struct wpabuf *priv = NULL, *csr_der = NULL, *tlv = NULL;
+	struct crypto_csr *csr = NULL;
+	struct x509_certificate *cert = NULL;
+	struct wpabuf *own_cert = NULL;
+	struct eap_peer_cert_config *cert_cfg;
+	const char *purpose;
+
+	cert_cfg = eap_teapv2_current_cert_config(sm);
+	if (!cert_cfg) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: No certificate configuration available for PKCS#10");
+		return NULL;
+	}
+
+	key = crypto_ec_key_gen(19);
+	if (!key)
+		goto fail;
+
+	priv = crypto_ec_key_get_ecprivate_key(key, true);
+	if (!priv)
+		goto fail;
+
+	csr = crypto_csr_init();
+	if (!csr || crypto_csr_set_ec_public_key(csr, key))
+		goto fail;
+
+	own_cert = tls_connection_get_own_cert(data->ssl.conn);
+	if (own_cert) {
+		cert = x509_certificate_parse(wpabuf_head(own_cert),
+					      wpabuf_len(own_cert));
+		wpabuf_free(own_cert);
+		own_cert = NULL;
+	}
+
+	if (eap_teapv2_populate_csr_subject(sm, csr, cert) < 0) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Failed to set CSR subject from existing credentials");
+		goto fail;
+	}
+
+	csr_der = crypto_csr_sign(csr, key, CRYPTO_HASH_ALG_SHA256);
+	if (!csr_der)
+		goto fail;
+
+	purpose = sm->use_machine_cred ? "machine-key" : "user-key";
+	if (eap_teapv2_store_blob(sm, cert_cfg, purpose,
+				  wpabuf_head(priv), wpabuf_len(priv),
+				  &cert_cfg->private_key) < 0) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Failed to store generated private key");
+		goto fail;
+	}
+
+	tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) +
+			   wpabuf_len(csr_der));
+	if (!tlv)
+		goto fail;
+	eap_teapv2_put_tlv_buf(tlv, TEAPV2_TLV_PKCS10, csr_der);
+
+fail:
+	wpabuf_clear_free(priv);
+	wpabuf_free(csr_der);
+	crypto_csr_deinit(csr);
+	crypto_ec_key_deinit(key);
+	x509_certificate_free(cert);
+	wpabuf_free(own_cert);
+	return tlv;
+}
+
+
+static int eap_teapv2_process_pkcs7(struct eap_sm *sm, const u8 *pkcs7,
+				    size_t len)
+{
+	struct wpabuf *src = NULL, *pem = NULL;
+	struct eap_peer_cert_config *cert_cfg;
+	const char *purpose;
+	int ret = -1;
+
+	cert_cfg = eap_teapv2_current_cert_config(sm);
+	if (!cert_cfg)
+		return -1;
+
+	src = wpabuf_alloc_copy(pkcs7, len);
+	if (!src)
+		return -1;
+	pem = crypto_pkcs7_get_certificates(src);
+	if (!pem) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Could not parse PKCS#7 certificate bundle");
+		goto done;
+	}
+
+	purpose = sm->use_machine_cred ? "machine-cert" : "user-cert";
+	if (eap_teapv2_store_blob(sm, cert_cfg, purpose,
+				  wpabuf_head(pem), wpabuf_len(pem),
+				  &cert_cfg->client_cert) < 0) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Failed to store received PKCS#7 certificate");
+		goto done;
+	}
+
+	wpa_printf(MSG_INFO,
+		   "EAP-TEAPV2: Installed %s certificate from PKCS#7",
+		   sm->use_machine_cred ? "machine" : "user");
+	ret = 0;
+
+done:
+	wpabuf_free(src);
+	wpabuf_free(pem);
+	return ret;
+}
 
 static void eap_teapv2_parse_phase1(struct eap_teapv2_data *data,
 				  const char *phase1)
@@ -978,6 +1245,28 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 			failed = 1;
 			goto done;
 		}
+	}
+
+	if (tlv.request_action == TEAPV2_REQUEST_ACTION_PROCESS_TLV &&
+	    tlv.request_action_tlvs_type == TEAPV2_TLV_PKCS10) {
+		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Generating PKCS#10 response");
+		tmp = eap_teapv2_build_pkcs10_tlv(sm, data);
+		if (!tmp) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to build PKCS#10 TLV");
+			failed = 1;
+			goto done;
+		}
+		resp = wpabuf_concat(resp, tmp);
+		goto send_resp;
+	}
+
+	if (tlv.pkcs7 &&
+	    eap_teapv2_process_pkcs7(sm, tlv.pkcs7, tlv.pkcs7_len) < 0) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Failed to store PKCS#7 certificate");
+		failed = 1;
+		goto done;
 	}
 
 	if (tlv.basic_auth_req) {

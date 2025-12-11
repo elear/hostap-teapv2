@@ -188,6 +188,9 @@ struct eap_teapv2_tlv_parse {
 	size_t nak_len;
 	u8 request_action;
 	u8 request_action_status;
+	u16 request_action_tlvs_type;
+	u8 *request_action_tlv;
+	size_t request_action_tlv_len;
 	u8 *pac;
 	size_t pac_len;
 	u8 *basic_auth_req;
@@ -196,6 +199,12 @@ struct eap_teapv2_tlv_parse {
 	size_t basic_auth_resp_len;
 	u32 error_code;
 	u16 identity_type;
+	u8 *pkcs10;
+	size_t pkcs10_len;
+	u8 *pkcs7;
+	size_t pkcs7_len;
+	u8 *trusted_server_root;
+	size_t trusted_server_root_len;
 };
 
 void eap_teapv2_put_tlv_hdr(struct wpabuf *buf, u16 type, u16 len);

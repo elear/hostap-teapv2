@@ -2720,7 +2720,26 @@ tls_connection_get_success_data(struct tls_connection *conn)
 
 bool tls_connection_get_own_cert_used(struct tls_connection *conn)
 {
-	if (conn)
-		return wolfSSL_get_certificate(conn->ssl) != NULL;
-	return false;
+	if (!conn)
+		return false;
+	return wolfSSL_get_certificate(conn->ssl) != NULL;
+}
+
+
+struct wpabuf * tls_connection_get_own_cert(struct tls_connection *conn)
+{
+	WOLFSSL_X509 *cert;
+	struct wpabuf *res;
+
+	if (!conn)
+		return NULL;
+
+	cert = wolfSSL_get_certificate(conn->ssl);
+	if (!cert)
+		return NULL;
+
+	res = get_x509_cert(cert);
+	wolfSSL_X509_free(cert);
+
+	return res;
 }
