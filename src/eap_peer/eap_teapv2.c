@@ -17,6 +17,9 @@
 #include "eap_config.h"
 #include "tls/x509v3.h"
 
+struct x509_certificate;
+void x509_certificate_free(struct x509_certificate *cert);
+
 
 static void eap_teapv2_deinit(struct eap_sm *sm, void *priv);
 
