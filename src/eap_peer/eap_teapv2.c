@@ -15,10 +15,9 @@
 #include "eap_i.h"
 #include "eap_tls_common.h"
 #include "eap_config.h"
+#ifdef CONFIG_TLS_INTERNAL
 #include "tls/x509v3.h"
-
-struct x509_certificate;
-void x509_certificate_free(struct x509_certificate *cert);
+#endif
 
 
 static void eap_teapv2_deinit(struct eap_sm *sm, void *priv);
@@ -127,6 +126,39 @@ static int eap_teapv2_store_blob(struct eap_sm *sm,
 }
 
 
+static int eap_teapv2_set_csr_subject_from_identity(struct eap_sm *sm,
+						    struct crypto_csr *csr)
+{
+	const u8 *identity = NULL;
+	size_t identity_len = 0;
+	struct eap_peer_config *config = eap_get_config(sm);
+	char *tmp;
+	int ret;
+
+	if (sm->identity) {
+		identity = sm->identity;
+		identity_len = sm->identity_len;
+	} else if (config && config->identity && config->identity_len) {
+		identity = config->identity;
+		identity_len = config->identity_len;
+	}
+
+	if (!identity || !identity_len)
+		return -1;
+
+	tmp = os_malloc(identity_len + 1);
+	if (!tmp)
+		return -1;
+	os_memcpy(tmp, identity, identity_len);
+	tmp[identity_len] = '\0';
+
+	ret = crypto_csr_set_name(csr, CSR_NAME_CN, tmp);
+	os_free(tmp);
+	return ret;
+}
+
+
+#ifdef CONFIG_TLS_INTERNAL
 static int eap_teapv2_set_csr_subject_from_cert(struct crypto_csr *csr,
 						struct x509_certificate *cert)
 {
@@ -170,46 +202,28 @@ static int eap_teapv2_set_csr_subject_from_cert(struct crypto_csr *csr,
 
 	return added ? 0 : -1;
 }
-
-
-static int eap_teapv2_set_csr_subject_from_identity(struct eap_sm *sm,
-						    struct crypto_csr *csr)
-{
-	const u8 *identity = NULL;
-	size_t identity_len = 0;
-	struct eap_peer_config *config = eap_get_config(sm);
-	char *tmp;
-	int ret;
-
-	if (sm->identity) {
-		identity = sm->identity;
-		identity_len = sm->identity_len;
-	} else if (config && config->identity && config->identity_len) {
-		identity = config->identity;
-		identity_len = config->identity_len;
-	}
-
-	if (!identity || !identity_len)
-		return -1;
-
-	tmp = os_malloc(identity_len + 1);
-	if (!tmp)
-		return -1;
-	os_memcpy(tmp, identity, identity_len);
-	tmp[identity_len] = '\0';
-
-	ret = crypto_csr_set_name(csr, CSR_NAME_CN, tmp);
-	os_free(tmp);
-	return ret;
-}
+#endif /* CONFIG_TLS_INTERNAL */
 
 
 static int eap_teapv2_populate_csr_subject(struct eap_sm *sm,
 					   struct crypto_csr *csr,
-					   struct x509_certificate *cert)
+					   const struct wpabuf *own_cert)
 {
-	if (eap_teapv2_set_csr_subject_from_cert(csr, cert) == 0)
-		return 0;
+#ifdef CONFIG_TLS_INTERNAL
+	struct x509_certificate *cert = NULL;
+
+	if (own_cert) {
+		cert = x509_certificate_parse(wpabuf_head(own_cert),
+					      wpabuf_len(own_cert));
+		if (cert && eap_teapv2_set_csr_subject_from_cert(csr, cert) == 0) {
+			x509_certificate_free(cert);
+			return 0;
+		}
+		x509_certificate_free(cert);
+	}
+#else /* CONFIG_TLS_INTERNAL */
+	(void) own_cert;
+#endif /* CONFIG_TLS_INTERNAL */
 
 	if (eap_teapv2_set_csr_subject_from_identity(sm, csr) == 0)
 		return 0;
@@ -224,7 +238,6 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	struct crypto_ec_key *key = NULL;
 	struct wpabuf *priv = NULL, *csr_der = NULL, *tlv = NULL;
 	struct crypto_csr *csr = NULL;
-	struct x509_certificate *cert = NULL;
 	struct wpabuf *own_cert = NULL;
 	struct eap_peer_cert_config *cert_cfg;
 	const char *purpose;
@@ -249,18 +262,13 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 		goto fail;
 
 	own_cert = tls_connection_get_own_cert(data->ssl.conn);
-	if (own_cert) {
-		cert = x509_certificate_parse(wpabuf_head(own_cert),
-					      wpabuf_len(own_cert));
-		wpabuf_free(own_cert);
-		own_cert = NULL;
-	}
-
-	if (eap_teapv2_populate_csr_subject(sm, csr, cert) < 0) {
+	if (eap_teapv2_populate_csr_subject(sm, csr, own_cert) < 0) {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to set CSR subject from existing credentials");
 		goto fail;
 	}
+	wpabuf_free(own_cert);
+	own_cert = NULL;
 
 	csr_der = crypto_csr_sign(csr, key, CRYPTO_HASH_ALG_SHA256);
 	if (!csr_der)
@@ -286,7 +294,6 @@ fail:
 	wpabuf_free(csr_der);
 	crypto_csr_deinit(csr);
 	crypto_ec_key_deinit(key);
-	x509_certificate_free(cert);
 	wpabuf_free(own_cert);
 	return tlv;
 }
