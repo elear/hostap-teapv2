@@ -1741,6 +1741,14 @@ int tls_connection_get_failed(void *ssl_ctx, struct tls_connection *conn)
 	return conn->failed;
 }
 
+int tls_connection_peer_cert_validity(void *ssl_ctx,
+				      struct tls_connection *conn,
+				      struct os_time *not_before,
+				      struct os_time *not_after)
+{
+	return -1;
+}
+
 
 int tls_connection_get_read_alerts(void *ssl_ctx, struct tls_connection *conn)
 {

@@ -44,6 +44,7 @@ struct eap_teapv2_data {
 	u8 cmk_emsk[EAP_TEAPV2_CMK_LEN];
 	int simck_idx;
 	bool cmk_emsk_available;
+	bool request_pkcs10;
 
 	u8 *srv_id;
 	size_t srv_id_len;
@@ -71,6 +72,30 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 					 struct eap_teapv2_data *data);
 static int eap_teapv2_phase2_init(struct eap_sm *sm, struct eap_teapv2_data *data,
 				int vendor, enum eap_type eap_type);
+
+static bool eap_teapv2_cert_near_expiry(struct eap_sm *sm,
+					struct eap_teapv2_data *data)
+{
+	struct os_time not_before, not_after, now;
+	long long lifetime, remaining;
+
+	if (!sm->cfg->eap_teapv2_request_action_pkcs10)
+		return false;
+
+	if (tls_connection_peer_cert_validity(sm->cfg->ssl_ctx, data->ssl.conn,
+					      &not_before, &not_after) < 0)
+		return false;
+
+	if (os_get_time(&now) < 0)
+		return false;
+
+	lifetime = (long long) not_after.sec - (long long) not_before.sec;
+	remaining = (long long) not_after.sec - (long long) now.sec;
+	if (lifetime <= 0 || remaining < 0)
+		return false;
+
+	return remaining * 3 < lifetime * 2;
+}
 
 
 static const char * eap_teapv2_state_txt(int state)
@@ -327,9 +352,40 @@ static int eap_teapv2_phase1_done(struct eap_sm *sm, struct eap_teapv2_data *dat
 		return -1;
 	}
 
+	data->request_pkcs10 = eap_teapv2_cert_near_expiry(sm, data);
+	if (data->request_pkcs10) {
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: Peer certificate is past the 2/3 lifetime threshold - request PKCS#10 CSR");
+	}
+
 	eap_teapv2_state(data, PHASE2_START);
 
 	return 0;
+}
+
+
+static struct wpabuf *
+eap_teapv2_add_request_action(struct eap_teapv2_data *data,
+			      struct wpabuf *msg)
+{
+	struct wpabuf *tlv;
+
+	if (!msg || !data->request_pkcs10)
+		return msg;
+
+	tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) + 4);
+	if (!tlv) {
+		wpabuf_free(msg);
+		return NULL;
+	}
+
+	eap_teapv2_put_tlv_hdr(tlv, TEAPV2_TLV_REQUEST_ACTION, 4);
+	wpabuf_put_u8(tlv, TEAPV2_STATUS_SUCCESS);
+	wpabuf_put_u8(tlv, TEAPV2_REQUEST_ACTION_PROCESS_TLV);
+	wpabuf_put_be16(tlv, TEAPV2_TLV_PKCS10);
+
+	data->request_pkcs10 = false;
+	return wpabuf_concat(msg, tlv);
 }
 
 
@@ -375,7 +431,8 @@ static struct wpabuf * eap_teapv2_build_phase2_req(struct eap_sm *sm,
 			return NULL;
 		}
 		eap_teapv2_put_tlv_hdr(req, TEAPV2_TLV_BASIC_PASSWORD_AUTH_REQ, 0);
-		return wpabuf_concat(req, id_tlv);
+		return eap_teapv2_add_request_action(data,
+						     wpabuf_concat(req, id_tlv));
 	}
 
 	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Initiate inner EAP method");
@@ -395,7 +452,9 @@ static struct wpabuf * eap_teapv2_build_phase2_req(struct eap_sm *sm,
 
 	wpa_hexdump_buf_key(MSG_MSGDUMP, "EAP-TEAPV2: Phase 2 EAP-Request", req);
 
-	return wpabuf_concat(eap_teapv2_tlv_eap_payload(req), id_tlv);
+	req = eap_teapv2_tlv_eap_payload(req);
+	req = wpabuf_concat(req, id_tlv);
+	return eap_teapv2_add_request_action(data, req);
 }
 
 

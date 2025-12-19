@@ -2549,6 +2549,8 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		bss->eap_teapv2_id = atoi(pos);
 	} else if (os_strcmp(buf, "eap_teapv2_method_sequence") == 0) {
 		bss->eap_teapv2_method_sequence = atoi(pos);
+	} else if (os_strcmp(buf, "eap_teapv2_request_action_pkcs10") == 0) {
+		bss->eap_teapv2_request_action_pkcs10 = atoi(pos);
 #endif /* EAP_SERVER_TEAPV2 */
 #ifdef EAP_SERVER_SIM
 	} else if (os_strcmp(buf, "eap_sim_db") == 0) {

@@ -5183,6 +5183,47 @@ int tls_connection_get_failed(void *ssl_ctx, struct tls_connection *conn)
 	return conn->failed;
 }
 
+static int openssl_asn1_time_to_os_time(const ASN1_TIME *asn1,
+					struct os_time *t)
+{
+	struct tm tm;
+	os_time_t sec;
+
+	if (!asn1 || !t)
+		return -1;
+
+	if (ASN1_TIME_to_tm(asn1, &tm) != 1)
+		return -1;
+
+	if (os_mktime(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		      tm.tm_hour, tm.tm_min, tm.tm_sec, &sec) < 0)
+		return -1;
+
+	t->sec = sec;
+	t->usec = 0;
+	return 0;
+}
+
+
+int tls_connection_peer_cert_validity(void *ssl_ctx,
+				      struct tls_connection *conn,
+				      struct os_time *not_before,
+				      struct os_time *not_after)
+{
+	const ASN1_TIME *nb, *na;
+
+	if (!conn || !conn->peer_cert)
+		return -1;
+
+	nb = X509_get0_notBefore(conn->peer_cert);
+	na = X509_get0_notAfter(conn->peer_cert);
+	if (openssl_asn1_time_to_os_time(nb, not_before) < 0 ||
+	    openssl_asn1_time_to_os_time(na, not_after) < 0)
+		return -1;
+
+	return 0;
+}
+
 
 int tls_connection_get_read_alerts(void *ssl_ctx, struct tls_connection *conn)
 {

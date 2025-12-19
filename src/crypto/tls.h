@@ -602,6 +602,11 @@ int __must_check tls_connection_client_hello_ext(void *tls_ctx,
  */
 int tls_connection_get_failed(void *tls_ctx, struct tls_connection *conn);
 
+int tls_connection_peer_cert_validity(void *ssl_ctx,
+				      struct tls_connection *conn,
+				      struct os_time *not_before,
+				      struct os_time *not_after);
+
 /**
  * tls_connection_get_read_alerts - Get connection read alert status
  * @tls_ctx: TLS context data from tls_init()

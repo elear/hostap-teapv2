@@ -219,6 +219,7 @@ struct eap_config {
 		EAP_TEAPV2_ID_REQUIRE_USER_AND_MACHINE = 5,
 	} eap_teapv2_id;
 	int eap_teapv2_method_sequence;
+	int eap_teapv2_request_action_pkcs10;
 
 	/**
 	 * eap_sim_aka_result_ind - EAP-SIM/AKA protected success indication

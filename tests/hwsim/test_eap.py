@@ -5,7 +5,16 @@
 # See README for more details.
 
 import logging
+import random
 logger = logging.getLogger()
+
+import os
+
+try:
+    import OpenSSL
+    openssl_imported = True
+except ImportError:
+    openssl_imported = False
 
 import hostapd
 from utils import alloc_fail, fail_test, wait_fail_trigger, HwsimSkip
@@ -31,19 +40,57 @@ def int_teap_server_params(eap_teap_auth=None,
 def int_teapv2_server_params(eap_teapv2_auth=None,
                              eap_teapv2_separate_result=None,
                              eap_teapv2_id=None,
-                             eap_teapv2_method_sequence=None):
+                             eap_teapv2_method_sequence=None,
+                             eap_teapv2_request_action_pkcs10=None):
     params = int_eap_server_params()
     params['eap_fast_a_id'] = "101112131415161718191a1b1c1dff00"
     params['eap_fast_a_id_info'] = "test server 0"
-    if eap_teapv2_auth:
+    if eap_teapv2_auth is not None:
         params['eap_teapv2_auth'] = eap_teapv2_auth
-    if eap_teapv2_separate_result:
+    if eap_teapv2_separate_result is not None:
         params['eap_teapv2_separate_result'] = eap_teapv2_separate_result
-    if eap_teapv2_id:
+    if eap_teapv2_id is not None:
         params['eap_teapv2_id'] = eap_teapv2_id
-    if eap_teapv2_method_sequence:
+    if eap_teapv2_method_sequence is not None:
         params['eap_teapv2_method_sequence'] = eap_teapv2_method_sequence
+    if eap_teapv2_request_action_pkcs10 is not None:
+        params['eap_teapv2_request_action_pkcs10'] = \
+            eap_teapv2_request_action_pkcs10
     return params
+
+def teapv2_generate_near_expiry_cert(logdir):
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    with open("auth_serv/ca.pem", "rb") as f:
+        cacert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM,
+                                                 f.read())
+    with open("auth_serv/ca-key.pem", "rb") as f:
+        cakey = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM,
+                                               f.read())
+
+    key = OpenSSL.crypto.PKey()
+    key.generate_key(OpenSSL.crypto.TYPE_RSA, 2048)
+
+    cert = OpenSSL.crypto.X509()
+    cert.set_serial_number(random.randint(1, 1000000))
+    cert.gmtime_adj_notBefore(-365 * 24 * 3600)
+    cert.gmtime_adj_notAfter(365 * 24 * 3600)
+    cert.set_pubkey(key)
+    subject = cert.get_subject()
+    subject.CN = "teapv2-pkcs10"
+    cert.set_issuer(cacert.get_subject())
+    cert.sign(cakey, "sha256")
+
+    cert_file = os.path.join(logdir, "teapv2-expiring.pem")
+    key_file = os.path.join(logdir, "teapv2-expiring.key")
+    with open(cert_file, "wb") as f:
+        f.write(OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
+                                                cert))
+    with open(key_file, "wb") as f:
+        f.write(OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM,
+                                               key))
+    return cert_file, key_file
 
 def test_eap_teap_eap_mschapv2(dev, apdev):
     """EAP-TEAP with inner EAP-MSCHAPv2"""
@@ -66,6 +113,26 @@ def test_eap_teapv2_eap_mschapv2(dev, apdev):
                 anonymous_identity="TEAPV2", password="password",
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
     eap_reauth(dev[0], "TEAPV2")
+
+def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
+    """EAP-TEAPV2 PKCS#10 Request-Action when client cert near expiry"""
+    check_eap_capa(dev[0], "TEAPV2")
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    client_cert, client_key = teapv2_generate_near_expiry_cert(params['logdir'])
+    server_params = int_teapv2_server_params(
+        eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1")
+    hapd = hostapd.add_ap(apdev[0], server_params)
+
+    eap_connect(dev[0], hapd, "TEAPV2", "teapv2-pkcs10",
+                anonymous_identity="TEAPV2",
+                ca_cert="auth_serv/ca.pem",
+                client_cert=client_cert, private_key=client_key)
+
+    blobs = dev[0].request("LIST_BLOBS")
+    if "teapv2-user-key" not in blobs:
+        raise Exception("PKCS#10 response blob not stored")
 
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""

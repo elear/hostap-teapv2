@@ -339,6 +339,8 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 	cfg->eap_teapv2_id = hapd->conf->eap_teapv2_id;
 	cfg->eap_teapv2_method_sequence =
 		hapd->conf->eap_teapv2_method_sequence;
+	cfg->eap_teapv2_request_action_pkcs10 =
+		hapd->conf->eap_teapv2_request_action_pkcs10;
 	cfg->eap_sim_aka_result_ind = hapd->conf->eap_sim_aka_result_ind;
 	cfg->eap_sim_id = hapd->conf->eap_sim_id;
 	cfg->imsi_privacy_key = hapd->imsi_privacy_key;
