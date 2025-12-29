@@ -75,7 +75,7 @@ def teapv2_generate_near_expiry_cert(logdir):
     cert = OpenSSL.crypto.X509()
     cert.set_serial_number(random.randint(1, 1000000))
     cert.gmtime_adj_notBefore(-365 * 24 * 3600)
-    cert.gmtime_adj_notAfter(365 * 24 * 3600)
+    cert.gmtime_adj_notAfter(20 * 24 * 3600)
     cert.set_pubkey(key)
     subject = cert.get_subject()
     subject.CN = "teapv2-pkcs10"
