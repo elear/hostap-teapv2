@@ -84,9 +84,13 @@ def teapv2_generate_near_expiry_cert(logdir):
 
     cert_file = os.path.join(logdir, "teapv2-expiring.pem")
     key_file = os.path.join(logdir, "teapv2-expiring.key")
+    cert_pem = OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
+                                               cert)
+    ca_pem = OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
+                                             cacert)
     with open(cert_file, "wb") as f:
-        f.write(OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
-                                                cert))
+        f.write(cert_pem)
+        f.write(ca_pem)
     with open(key_file, "wb") as f:
         f.write(OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM,
                                                key))
