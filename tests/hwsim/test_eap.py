@@ -125,7 +125,7 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
         eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1")
     hapd = hostapd.add_ap(apdev[0], server_params)
 
-    eap_connect(dev[0], hapd, "TEAPV2", "teapv2-pkcs10",
+    eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
                 anonymous_identity="TEAPV2",
                 ca_cert="auth_serv/ca.pem",
                 client_cert=client_cert, private_key=client_key)
