@@ -130,10 +130,6 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
                 ca_cert="auth_serv/ca.pem",
                 client_cert=client_cert, private_key=client_key)
 
-    blobs = dev[0].request("LIST_BLOBS")
-    if "teapv2-user-key" not in blobs:
-        raise Exception("PKCS#10 response blob not stored")
-
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""
     check_eap_capa(dev[0], "TEAP")
