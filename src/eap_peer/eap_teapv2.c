@@ -55,6 +55,7 @@ struct eap_teapv2_data {
 	u8 simck_emsk[EAP_TEAPV2_SIMCK_LEN];
 	int simck_idx;
 	bool cmk_emsk_available;
+	bool pkcs10_requested;
 
 	struct wpabuf *pending_phase2_req;
 	struct wpabuf *pending_resp;
@@ -288,6 +289,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	if (!tlv)
 		goto fail;
 	eap_teapv2_put_tlv_buf(tlv, TEAPV2_TLV_PKCS10, csr_der);
+	data->pkcs10_requested = true;
 
 fail:
 	wpabuf_clear_free(priv);
@@ -321,6 +323,12 @@ static int eap_teapv2_process_pkcs7(struct eap_sm *sm, const u8 *pkcs7,
 		goto done;
 	}
 
+	if (!data->pkcs10_requested) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Ignoring unsolicited PKCS#7 certificate");
+		goto done;
+	}
+
 	purpose = sm->use_machine_cred ? "machine-cert" : "user-cert";
 	if (eap_teapv2_store_blob(sm, cert_cfg, purpose,
 				  wpabuf_head(pem), wpabuf_len(pem),
@@ -333,6 +341,7 @@ static int eap_teapv2_process_pkcs7(struct eap_sm *sm, const u8 *pkcs7,
 	wpa_printf(MSG_INFO,
 		   "EAP-TEAPV2: Installed %s certificate from PKCS#7",
 		   sm->use_machine_cred ? "machine" : "user");
+	data->pkcs10_requested = false;
 	ret = 0;
 
 done:
