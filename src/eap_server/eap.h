@@ -261,6 +261,8 @@ struct eap_config {
 	 */
 	u8 *server_id;
 	size_t server_id_len;
+	char *server_cert;
+	char *private_key;
 
 	/**
 	 * erp - Whether EAP Re-authentication Protocol (ERP) is enabled

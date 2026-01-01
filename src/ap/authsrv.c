@@ -358,6 +358,10 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 		cfg->server_id = (u8 *) os_strdup("hostapd");
 		cfg->server_id_len = 7;
 	}
+	if (hapd->conf->server_cert)
+		cfg->server_cert = os_strdup(hapd->conf->server_cert);
+	if (hapd->conf->private_key)
+		cfg->private_key = os_strdup(hapd->conf->private_key);
 	cfg->erp = hapd->conf->eap_server_erp;
 #ifdef CONFIG_TESTING_OPTIONS
 	cfg->skip_prot_success = hapd->conf->eap_skip_prot_success;
