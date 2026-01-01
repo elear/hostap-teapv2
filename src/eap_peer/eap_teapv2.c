@@ -301,8 +301,9 @@ fail:
 }
 
 
-static int eap_teapv2_process_pkcs7(struct eap_sm *sm, const u8 *pkcs7,
-				    size_t len)
+static int eap_teapv2_process_pkcs7(struct eap_sm *sm,
+				    struct eap_teapv2_data *data,
+				    const u8 *pkcs7, size_t len)
 {
 	struct wpabuf *src = NULL, *pem = NULL;
 	struct eap_peer_cert_config *cert_cfg;
@@ -1281,7 +1282,7 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	}
 
 	if (tlv.pkcs7 &&
-	    eap_teapv2_process_pkcs7(sm, tlv.pkcs7, tlv.pkcs7_len) < 0) {
+	    eap_teapv2_process_pkcs7(sm, data, tlv.pkcs7, tlv.pkcs7_len) < 0) {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to store PKCS#7 certificate");
 		failed = 1;
