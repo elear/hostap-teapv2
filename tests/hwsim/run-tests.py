@@ -541,7 +541,7 @@ def main():
         try:
             with open('/sys/kernel/debug/clear_warn_once', 'w') as f:
                 f.write('1\n')
-        except FileNotFoundError:
+        except:
             pass
 
         reset_ok = True
