@@ -28,6 +28,7 @@
 #include <openssl/err.h>
 #include <openssl/opensslv.h>
 #include <openssl/pkcs12.h>
+#include <openssl/pkcs7.h>
 #include <openssl/x509v3.h>
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 #include <openssl/core_names.h>
@@ -5222,6 +5223,68 @@ int tls_connection_peer_cert_validity(void *ssl_ctx,
 		return -1;
 
 	return 0;
+}
+
+struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
+					  size_t len, const char *cert_file,
+					  const char *key_file)
+{
+	struct wpabuf *out = NULL;
+	BIO *cbio = NULL, *kbio = NULL;
+	X509 *cert = NULL;
+	EVP_PKEY *pkey = NULL;
+	PKCS7 *p7 = NULL;
+	unsigned char *pos;
+	int der_len;
+
+	(void) ssl_ctx;
+	(void) pkcs10;
+	(void) len;
+
+	if (!cert_file || !key_file)
+		goto fail;
+
+	cbio = BIO_new_file(cert_file, "r");
+	if (!cbio)
+		goto fail;
+	cert = PEM_read_bio_X509(cbio, NULL, NULL, NULL);
+	if (!cert)
+		goto fail;
+
+	kbio = BIO_new_file(key_file, "r");
+	if (!kbio)
+		goto fail;
+	pkey = PEM_read_bio_PrivateKey(kbio, NULL, NULL, NULL);
+	if (!pkey)
+		goto fail;
+
+	p7 = PKCS7_sign(cert, pkey, NULL, NULL,
+			PKCS7_BINARY | PKCS7_PARTIAL);
+	if (!p7)
+		goto fail;
+	if (PKCS7_add_certificate(p7, cert) != 1 ||
+	    PKCS7_final(p7, NULL, PKCS7_BINARY) != 1)
+		goto fail;
+
+	der_len = i2d_PKCS7(p7, NULL);
+	if (der_len <= 0)
+		goto fail;
+	out = wpabuf_alloc(der_len);
+	if (!out)
+		goto fail;
+	pos = wpabuf_put(out, der_len);
+	if (i2d_PKCS7(p7, &pos) != der_len) {
+		wpabuf_free(out);
+		out = NULL;
+	}
+
+fail:
+	PKCS7_free(p7);
+	X509_free(cert);
+	EVP_PKEY_free(pkey);
+	BIO_free(cbio);
+	BIO_free(kbio);
+	return out;
 }
 
 

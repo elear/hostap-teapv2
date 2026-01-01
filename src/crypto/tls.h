@@ -607,6 +607,10 @@ int tls_connection_peer_cert_validity(void *ssl_ctx,
 				      struct os_time *not_before,
 				      struct os_time *not_after);
 
+struct wpabuf * tls_connection_sign_pkcs7(void *tls_ctx, const u8 *pkcs10,
+					  size_t len, const char *cert_file,
+					  const char *key_file);
+
 /**
  * tls_connection_get_read_alerts - Get connection read alert status
  * @tls_ctx: TLS context data from tls_init()

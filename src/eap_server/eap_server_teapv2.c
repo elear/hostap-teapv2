@@ -65,6 +65,8 @@ struct eap_teapv2_data {
 	enum teapv2_identity_types cur_id_type;
 
 	bool check_crypto_binding;
+	struct wpabuf *pkcs7_cert;
+	bool pkcs10_expected;
 };
 
 
@@ -272,6 +274,7 @@ static void eap_teapv2_reset(struct eap_sm *sm, void *priv)
 	if (data->phase2_priv && data->phase2_method)
 		data->phase2_method->reset(sm, data->phase2_priv);
 	eap_server_tls_ssl_deinit(sm, &data->ssl);
+	wpabuf_free(data->pkcs7_cert);
 	os_free(data->srv_id);
 	os_free(data->srv_id_info);
 	wpabuf_free(data->pending_phase2_resp);
@@ -385,6 +388,31 @@ eap_teapv2_add_request_action(struct eap_teapv2_data *data,
 	wpabuf_put_be16(tlv, TEAPV2_TLV_PKCS10);
 
 	data->request_pkcs10 = false;
+	data->pkcs10_expected = true;
+	return wpabuf_concat(msg, tlv);
+}
+
+static struct wpabuf *
+eap_teapv2_add_pkcs7(struct eap_teapv2_data *data, struct wpabuf *msg)
+{
+	struct wpabuf *tlv;
+
+	if (!msg || !data || !data->pkcs7_cert || data->pkcs10_expected)
+		return msg;
+
+	tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) +
+			   wpabuf_len(data->pkcs7_cert));
+	if (!tlv) {
+		wpabuf_free(msg);
+		return NULL;
+	}
+
+	eap_teapv2_put_tlv_hdr(tlv, TEAPV2_TLV_PKCS7,
+			       wpabuf_len(data->pkcs7_cert));
+	wpabuf_put_buf(tlv, data->pkcs7_cert);
+	wpabuf_free(data->pkcs7_cert);
+	data->pkcs7_cert = NULL;
+
 	return wpabuf_concat(msg, tlv);
 }
 
@@ -454,7 +482,8 @@ static struct wpabuf * eap_teapv2_build_phase2_req(struct eap_sm *sm,
 
 	req = eap_teapv2_tlv_eap_payload(req);
 	req = wpabuf_concat(req, id_tlv);
-	return eap_teapv2_add_request_action(data, req);
+	req = eap_teapv2_add_request_action(data, req);
+	return eap_teapv2_add_pkcs7(data, req);
 }
 
 
@@ -551,7 +580,7 @@ static struct wpabuf * eap_teapv2_build_crypto_binding(
 
 	data->check_crypto_binding = true;
 
-	return buf;
+	return eap_teapv2_add_pkcs7(data, buf);
 }
 
 
@@ -1243,6 +1272,27 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 			   WPA_GET_BE32(tlv.nak), WPA_GET_BE16(tlv.nak + 4));
 		eap_teapv2_state(data, FAILURE_SEND_RESULT);
 		return;
+	}
+
+	if (tlv.pkcs10) {
+		if (!data->pkcs10_expected) {
+			wpa_printf(MSG_DEBUG,
+				   "EAP-TEAPV2: Ignoring unexpected PKCS#10 TLV");
+		} else {
+			wpabuf_free(data->pkcs7_cert);
+			data->pkcs7_cert = tls_connection_sign_pkcs7(
+				sm->cfg->ssl_ctx, tlv.pkcs10, tlv.pkcs10_len,
+				sm->cfg->server_cert, sm->cfg->private_key);
+			data->pkcs10_expected = false;
+			if (data->pkcs7_cert) {
+				wpa_printf(MSG_DEBUG,
+					   "EAP-TEAPV2: Prepared PKCS#7 response (%u bytes)",
+					   (unsigned int) wpabuf_len(data->pkcs7_cert));
+			} else {
+				wpa_printf(MSG_INFO,
+					   "EAP-TEAPV2: Failed to prepare PKCS#7 response");
+			}
+		}
 	}
 
 	if (check_crypto_binding) {
