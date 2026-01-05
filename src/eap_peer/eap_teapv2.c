@@ -284,7 +284,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 
 		if (b64) {
 			/* Room for PEM headers/footers and newlines every 64 chars */
-			size_t pem_len = b64_len + b64_len / 64 + 64;
+			size_t pem_len = b64_len + b64_len / 64 + 96;
 			char *pem = os_malloc(pem_len);
 
 			if (pem) {
