@@ -23,7 +23,8 @@ struct eap_teapv2_data {
 	struct eap_ssl_data ssl;
 	enum {
 		START, PHASE1, PHASE1B, PHASE2_START, PHASE2_ID,
-		PHASE2_BASIC_AUTH, PHASE2_METHOD, CRYPTO_BINDING,
+		PHASE2_BASIC_AUTH, PHASE2_WAIT_PKCS10, PHASE2_METHOD,
+		CRYPTO_BINDING,
 		FAILURE_SEND_RESULT, SUCCESS_SEND_RESULT, SUCCESS, FAILURE
 	} state;
 
@@ -115,6 +116,8 @@ static const char * eap_teapv2_state_txt(int state)
 		return "PHASE2_ID";
 	case PHASE2_BASIC_AUTH:
 		return "PHASE2_BASIC_AUTH";
+	case PHASE2_WAIT_PKCS10:
+		return "PHASE2_WAIT_PKCS10";
 	case PHASE2_METHOD:
 		return "PHASE2_METHOD";
 	case CRYPTO_BINDING:
@@ -389,6 +392,7 @@ eap_teapv2_add_request_action(struct eap_teapv2_data *data,
 
 	data->request_pkcs10 = false;
 	data->pkcs10_expected = true;
+	eap_teapv2_state(data, PHASE2_WAIT_PKCS10);
 	return wpabuf_concat(msg, tlv);
 }
 
@@ -499,8 +503,8 @@ static struct wpabuf * eap_teapv2_build_crypto_binding(
 	if (!buf)
 		return NULL;
 
-	if (data->basic_auth_not_done || data->inner_eap_not_done ||
-	    data->phase2_method || sm->cfg->eap_teapv2_separate_result)
+	if (data->basic_auth_not_done || data->inner_eap_not_done || data->pkcs10_expected ||
+	    data->request_pkcs10 || data->phase2_method || sm->cfg->eap_teapv2_separate_result)
 		data->final_result = 0;
 	else
 		data->final_result = 1;
@@ -674,6 +678,7 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 		break;
 	case PHASE2_ID:
 	case PHASE2_BASIC_AUTH:
+	case PHASE2_WAIT_PKCS10:
 	case PHASE2_METHOD:
 		req = eap_teapv2_build_phase2_req(sm, data, id);
 		break;
@@ -1556,6 +1561,7 @@ static void eap_teapv2_process_msg(struct eap_sm *sm, void *priv,
 		break;
 	case PHASE2_ID:
 	case PHASE2_BASIC_AUTH:
+	case PHASE2_WAIT_PKCS10:
 	case PHASE2_METHOD:
 	case CRYPTO_BINDING:
 	case SUCCESS_SEND_RESULT:
