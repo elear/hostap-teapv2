@@ -5240,7 +5240,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	(void) ssl_ctx;
 	(void) pkcs10;
 	(void) len;
-	wpa_printf(MSG_DEBUG,"Entered tls_connection_sign_pkcs7");
+
 	if (!cert_file || !key_file) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: PKCS#7 signing failed - missing cert or key file");
@@ -5277,9 +5277,16 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		wpa_printf(MSG_INFO, "OpenSSL: PKCS7_sign failed");
 		goto fail;
 	}
-	if (PKCS7_add_certificate(p7, cert) != 1 ||
-	    PKCS7_final(p7, NULL, PKCS7_BINARY) != 1)
+	if (PKCS7_add_certificate(p7, cert) != 1 ) {
+		wpa_printf(MSG_INFO, "OpenSSL: PKCS7_add_certificate failed");
+		goto fail;	
+	}
+	
+	if (PKCS7_final(p7, NULL, PKCS7_BINARY) != 1) {
+		wpa_printf(MSG_INFO,"OpenSSL: PKCS7_final failed");
 		goto fail;
+	}
+
 
 	der_len = i2d_PKCS7(p7, NULL);
 	if (der_len <= 0) {
