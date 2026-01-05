@@ -5241,34 +5241,51 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	(void) pkcs10;
 	(void) len;
 
-	if (!cert_file || !key_file)
+	if (!cert_file || !key_file) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: PKCS#7 signing failed - missing cert or key file");
 		goto fail;
+	}
 
 	cbio = BIO_new_file(cert_file, "r");
-	if (!cbio)
+	if (!cbio) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to read signing cert '%s'", cert_file);
 		goto fail;
+	}
 	cert = PEM_read_bio_X509(cbio, NULL, NULL, NULL);
-	if (!cert)
+	if (!cert) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to parse signing cert");
 		goto fail;
+	}
 
 	kbio = BIO_new_file(key_file, "r");
-	if (!kbio)
+	if (!kbio) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to read signing key '%s'", key_file);
 		goto fail;
+	}
 	pkey = PEM_read_bio_PrivateKey(kbio, NULL, NULL, NULL);
-	if (!pkey)
+	if (!pkey) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to parse signing key");
 		goto fail;
+	}
 
 	p7 = PKCS7_sign(cert, pkey, NULL, NULL,
 			PKCS7_BINARY | PKCS7_PARTIAL);
-	if (!p7)
+	if (!p7) {
+		wpa_printf(MSG_INFO, "OpenSSL: PKCS7_sign failed");
 		goto fail;
+	}
 	if (PKCS7_add_certificate(p7, cert) != 1 ||
 	    PKCS7_final(p7, NULL, PKCS7_BINARY) != 1)
 		goto fail;
 
 	der_len = i2d_PKCS7(p7, NULL);
-	if (der_len <= 0)
+	if (der_len <= 0) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to DER-encode PKCS#7");
 		goto fail;
+	}
 	out = wpabuf_alloc(der_len);
 	if (!out)
 		goto fail;
