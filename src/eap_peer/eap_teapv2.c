@@ -14,6 +14,7 @@
 #include "eap_common/eap_teapv2_common.h"
 #include "eap_i.h"
 #include "eap_tls_common.h"
+#include "base64.h"
 #include "eap_config.h"
 #ifdef CONFIG_TLS_INTERNAL
 #include "tls/x509v3.h"
@@ -274,6 +275,50 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	csr_der = crypto_csr_sign(csr, key, CRYPTO_HASH_ALG_SHA256);
 	if (!csr_der)
 		goto fail;
+	wpa_hexdump_buf(MSG_MSGDUMP, "EAP-TEAPV2: PKCS#10 CSR (DER)",
+			csr_der);
+	{
+		size_t b64_len;
+		char *b64 = base64_encode(wpabuf_head(csr_der),
+					  wpabuf_len(csr_der), &b64_len);
+
+		if (b64) {
+			/* Room for PEM headers/footers and newlines every 64 chars */
+			size_t pem_len = b64_len + b64_len / 64 + 64;
+			char *pem = os_malloc(pem_len);
+
+			if (pem) {
+				char *pos = pem;
+				size_t left = pem_len;
+				size_t i;
+
+				pos += os_strlcpy(pos,
+						  "-----BEGIN CERTIFICATE REQUEST-----\n",
+						  left);
+				left = pem_len - (pos - pem);
+
+				for (i = 0; i < b64_len && left > 1; i += 64) {
+					size_t line = b64_len - i;
+					if (line > 64)
+						line = 64;
+					pos += os_snprintf(pos, left, "%.*s\n",
+							   (int) line, b64 + i);
+					left = pem_len - (pos - pem);
+				}
+
+				if (left > 0) {
+					os_strlcpy(pos,
+						   "-----END CERTIFICATE REQUEST-----",
+						   left);
+					wpa_printf(MSG_DEBUG,
+						   "EAP-TEAPV2: PKCS#10 CSR (PEM)\n%s",
+						   pem);
+				}
+				os_free(pem);
+			}
+			os_free(b64);
+		}
+	}
 
 	purpose = sm->use_machine_cred ? "machine-key" : "user-key";
 	if (eap_teapv2_store_blob(sm, cert_cfg, purpose,
