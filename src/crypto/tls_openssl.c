@@ -5241,14 +5241,6 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	(void) pkcs10;
 	(void) len;
 
-	wpa_printf(MSG_DEBUG,
-		   "OpenSSL: tls_connection_sign_pkcs7 pkcs10=%p len=%zu cert_file=%s key_file=%s",
-		   pkcs10, len, cert_file ? cert_file : "(null)",
-		   key_file ? key_file : "(null)");
-	if (pkcs10 && len)
-		wpa_hexdump(MSG_MSGDUMP, "OpenSSL: PKCS#10 CSR (DER)", pkcs10,
-			    len);
-
 	if (!cert_file || !key_file) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: PKCS#7 signing failed - missing cert or key file");
