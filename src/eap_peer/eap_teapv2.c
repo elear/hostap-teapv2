@@ -301,7 +301,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 					size_t line = b64_len - i;
 					if (line > 64)
 						line = 64;
-					pos += os_snprintf(pos, left, "%.*s\n",
+					pos += os_snprintf(pos, left, "%.*s",
 							   (int) line, b64 + i);
 					left = pem_len - (pos - pem);
 				}
