@@ -11,6 +11,7 @@
 #include "common.h"
 #include "crypto/tls.h"
 #include "crypto/random.h"
+#include "base64.h"
 #include "eap_common/eap_teapv2_common.h"
 #include "eap_i.h"
 #include "eap_tls_common.h"
@@ -67,6 +68,7 @@ struct eap_teapv2_data {
 
 	bool check_crypto_binding;
 	struct wpabuf *pkcs7_cert;
+	struct wpabuf *pkcs10_csr;
 	bool pkcs10_expected;
 };
 
@@ -278,6 +280,7 @@ static void eap_teapv2_reset(struct eap_sm *sm, void *priv)
 		data->phase2_method->reset(sm, data->phase2_priv);
 	eap_server_tls_ssl_deinit(sm, &data->ssl);
 	wpabuf_free(data->pkcs7_cert);
+	wpabuf_free(data->pkcs10_csr);
 	os_free(data->srv_id);
 	os_free(data->srv_id_info);
 	wpabuf_free(data->pending_phase2_resp);
@@ -404,6 +407,50 @@ eap_teapv2_add_pkcs7(struct eap_teapv2_data *data, struct wpabuf *msg)
 	if (!msg || !data || !data->pkcs7_cert || data->pkcs10_expected)
 		return msg;
 	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Generating PKCS7 TLV");
+	if (data->pkcs10_csr) {
+		size_t b64_len;
+		char *b64 = base64_encode(wpabuf_head(data->pkcs10_csr),
+					  wpabuf_len(data->pkcs10_csr),
+					  &b64_len);
+
+		if (b64) {
+			size_t pem_len = b64_len + b64_len / 64 + 64;
+			char *pem = os_malloc(pem_len);
+
+			if (pem) {
+				char *pos = pem;
+				size_t left = pem_len;
+				size_t i;
+
+				pos += os_strlcpy(pos,
+						  "-----BEGIN CERTIFICATE REQUEST-----\n",
+						  left);
+				left = pem_len - (pos - pem);
+
+				for (i = 0; i < b64_len && left > 1; i += 64) {
+					size_t line = b64_len - i;
+					if (line > 64)
+						line = 64;
+					pos += os_snprintf(pos, left, "%.*s\n",
+							   (int) line, b64 + i);
+					left = pem_len - (pos - pem);
+				}
+
+				if (left > 0) {
+					os_strlcpy(pos,
+						   "-----END CERTIFICATE REQUEST-----",
+						   left);
+					wpa_printf(MSG_DEBUG,
+						   "EAP-TEAPV2: Received PKCS#10 CSR (PEM)\n%s",
+						   pem);
+				}
+				os_free(pem);
+			}
+			os_free(b64);
+		}
+		wpabuf_free(data->pkcs10_csr);
+		data->pkcs10_csr = NULL;
+	}
 	tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) +
 			   wpabuf_len(data->pkcs7_cert));
 	if (!tlv) {
@@ -1288,6 +1335,9 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 			data->pkcs7_cert = tls_connection_sign_pkcs7(
 				sm->cfg->ssl_ctx, tlv.pkcs10, tlv.pkcs10_len,
 				sm->cfg->server_cert, sm->cfg->private_key);
+			wpabuf_free(data->pkcs10_csr);
+			data->pkcs10_csr = wpabuf_alloc_copy(tlv.pkcs10,
+							     tlv.pkcs10_len);
 			data->pkcs10_expected = false;
 			if (data->pkcs7_cert) {
 				wpa_printf(MSG_DEBUG,
