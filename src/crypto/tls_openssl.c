@@ -5291,6 +5291,8 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		goto fail;
 	pos = wpabuf_put(out, der_len);
 	if (i2d_PKCS7(p7, &pos) != der_len) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to serialize PKCS#7 into DER (wrote different length)");
 		wpabuf_free(out);
 		out = NULL;
 	}
