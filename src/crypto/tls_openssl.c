@@ -5294,7 +5294,8 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		wpabuf_free(out);
 		out = NULL;
 	}
-
+	return out;
+	
 fail:
 	PKCS7_free(p7);
 	X509_free(cert);
