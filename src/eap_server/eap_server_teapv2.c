@@ -583,7 +583,7 @@ static struct wpabuf * eap_teapv2_build_crypto_binding(
 		    cb->msk_compound_mac, sizeof(cb->msk_compound_mac));
 
 	data->check_crypto_binding = true;
-
+	buf = eap_teapv2_add_request_action(data, buf);
 	return eap_teapv2_add_pkcs7(data, buf);
 }
 
