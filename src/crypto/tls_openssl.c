@@ -5231,14 +5231,15 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 {
 	struct wpabuf *out = NULL;
 	BIO *cbio = NULL, *kbio = NULL;
-	X509 *cert = NULL;
+	X509 *cert = NULL, *signed_cert = NULL;
+	X509_REQ *req = NULL;
 	EVP_PKEY *pkey = NULL;
+	EVP_PKEY *req_pkey = NULL;
 	unsigned char *pos;
 	int der_len;
+	const unsigned char *p = pkcs10;
 
 	(void) ssl_ctx;
-	(void) pkcs10;
-	(void) len;
 
 	if (!cert_file || !key_file) {
 		wpa_printf(MSG_INFO,
@@ -5258,6 +5259,23 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		goto fail;
 	}
 
+	if (!pkcs10 || len == 0) {
+		wpa_printf(MSG_INFO, "OpenSSL: No PKCS#10 CSR provided");
+		goto fail;
+	}
+
+	req = d2i_X509_REQ(NULL, &p, len);
+	if (!req) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to parse PKCS#10 CSR");
+		goto fail;
+	}
+
+	req_pkey = X509_REQ_get_pubkey(req);
+	if (!req_pkey) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to get public key from CSR");
+		goto fail;
+	}
+
 	kbio = BIO_new_file(key_file, "r");
 	if (!kbio) {
 		wpa_printf(MSG_INFO,
@@ -5270,12 +5288,29 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		goto fail;
 	}
 
-	if (X509_sign(cert, pkey, EVP_sha256()) == 0) {
+	signed_cert = X509_new();
+	if (!signed_cert) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to allocate certificate");
+		goto fail;
+	}
+
+	if (X509_set_version(signed_cert, 2) != 1 ||
+	    ASN1_INTEGER_set(X509_get_serialNumber(signed_cert), 1) != 1 ||
+	    X509_set_issuer_name(signed_cert, X509_get_subject_name(cert)) != 1 ||
+	    X509_set_subject_name(signed_cert, X509_REQ_get_subject_name(req)) != 1 ||
+	    X509_set_pubkey(signed_cert, req_pkey) != 1 ||
+	    !X509_gmtime_adj(X509_get_notBefore(signed_cert), 0) ||
+	    !X509_gmtime_adj(X509_get_notAfter(signed_cert), 365 * 24 * 60 * 60)) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to populate certificate from CSR");
+		goto fail;
+	}
+
+	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
 		goto fail;
 	}
 
-	der_len = i2d_X509(cert, NULL);
+	der_len = i2d_X509(signed_cert, NULL);
 	if (der_len <= 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: Failed to DER-encode signed certificate");
 		goto fail;
@@ -5284,7 +5319,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	if (!out)
 		goto fail;
 	pos = wpabuf_put(out, der_len);
-	if (i2d_X509(cert, &pos) != der_len) {
+	if (i2d_X509(signed_cert, &pos) != der_len) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: Failed to serialize certificate into DER (wrote different length)");
 		wpabuf_free(out);
@@ -5292,8 +5327,11 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	}
 
 fail:
+	X509_free(signed_cert);
 	X509_free(cert);
 	EVP_PKEY_free(pkey);
+	EVP_PKEY_free(req_pkey);
+	X509_REQ_free(req);
 	BIO_free(cbio);
 	BIO_free(kbio);
 	return out;

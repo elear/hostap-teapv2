@@ -1358,7 +1358,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 						size_t i;
 
 						pos += os_strlcpy(pos,
-								  "-----BEGIN PKCS7-----\n",
+								  "-----BEGIN CERTIFICATE-----\n",
 								  left);
 						left = pem_len - (pos - pem);
 
@@ -1378,7 +1378,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 
 						if (left > 0) {
 							os_strlcpy(pos,
-								   "-----END PKCS7-----",
+								   "-----END CERTIFICATE-----",
 								   left);
 							wpa_printf(MSG_DEBUG,
 								   "EAP-TEAPV2: PKCS#7 response (PEM)\n%s",
