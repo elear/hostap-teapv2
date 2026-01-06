@@ -5235,6 +5235,8 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	X509_REQ *req = NULL;
 	EVP_PKEY *pkey = NULL;
 	EVP_PKEY *req_pkey = NULL;
+	X509_EXTENSION *ext = NULL;
+	X509V3_CTX ctx;
 	unsigned char *pos;
 	int der_len;
 	const unsigned char *p = pkcs10;
@@ -5304,6 +5306,17 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		wpa_printf(MSG_INFO, "OpenSSL: Failed to populate certificate from CSR");
 		goto fail;
 	}
+
+	X509V3_set_ctx(&ctx, cert, signed_cert, req, NULL, 0);
+	ext = X509V3_EXT_conf_nid(NULL, &ctx, NID_basic_constraints,
+				  "CA:FALSE");
+	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to add BasicConstraints extension");
+		X509_EXTENSION_free(ext);
+		goto fail;
+	}
+	X509_EXTENSION_free(ext);
 
 	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
