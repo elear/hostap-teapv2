@@ -5225,27 +5225,6 @@ int tls_connection_peer_cert_validity(void *ssl_ctx,
 	return 0;
 }
 
-static ASN1_OCTET_STRING * tls_openssl_pubkey_ski(X509 *cert)
-{
-	unsigned char skid[EVP_MAX_MD_SIZE];
-	unsigned int skid_len = 0;
-	ASN1_OCTET_STRING *ski;
-
-	if (!X509_pubkey_digest(cert, EVP_sha1(), skid, &skid_len))
-		return NULL;
-
-	ski = ASN1_OCTET_STRING_new();
-	if (!ski)
-		return NULL;
-
-	if (ASN1_OCTET_STRING_set(ski, skid, skid_len) != 1) {
-		ASN1_OCTET_STRING_free(ski);
-		return NULL;
-	}
-
-	return ski;
-}
-
 struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 					  size_t len, const char *cert_file,
 					  const char *key_file)
@@ -5256,6 +5235,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	X509_REQ *req = NULL;
 	EVP_PKEY *pkey = NULL;
 	EVP_PKEY *req_pkey = NULL;
+	STACK_OF(X509_EXTENSION) *exts = NULL;
 	X509_EXTENSION *ext = NULL;
 	AUTHORITY_KEYID *akid = NULL;
 	ASN1_OCTET_STRING *akid_data = NULL;
@@ -5263,11 +5243,13 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	ASN1_OCTET_STRING *ski = NULL;
 	ASN1_OCTET_STRING *ski_data = NULL;
 	unsigned char *akid_der = NULL;
+	unsigned char *ski_der = NULL;
 	ASN1_OCTET_STRING *bc_data = NULL;
 	unsigned char *bc_der = NULL;
 	unsigned char *pos;
 	int der_len;
 	int akid_der_len;
+	int ski_der_len;
 	int bc_der_len;
 	const unsigned char *p = pkcs10;
 
@@ -5365,14 +5347,20 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 
 	ext = X509_EXTENSION_create_by_NID(NULL, NID_basic_constraints, 0,
 					   bc_data);
-	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+	if (!ext) {
 		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to add BasicConstraints extension");
+			   "OpenSSL: Failed to create BasicConstraints extension");
+		goto fail;
+	}
+	if (!exts)
+		exts = sk_X509_EXTENSION_new_null();
+	if (!exts || sk_X509_EXTENSION_push(exts, ext) == 0) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to queue BasicConstraints extension");
 		X509_EXTENSION_free(ext);
 		ext = NULL;
 		goto fail;
 	}
-	X509_EXTENSION_free(ext);
 	ext = NULL;
 	ASN1_OCTET_STRING_free(bc_data);
 	bc_data = NULL;
@@ -5395,10 +5383,19 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 			goto fail;
 		}
 	} else {
-		akid->keyid = tls_openssl_pubkey_ski(cert);
-		if (!akid->keyid) {
+		unsigned char keyid[EVP_MAX_MD_SIZE];
+		unsigned int keyid_len = 0;
+
+		if (!X509_pubkey_digest(cert, EVP_sha1(), keyid, &keyid_len)) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to compute AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+		akid->keyid = ASN1_OCTET_STRING_new();
+		if (!akid->keyid ||
+		    ASN1_OCTET_STRING_set(akid->keyid, keyid, keyid_len) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set AuthorityKeyIdentifier keyid");
 			goto fail;
 		}
 	}
@@ -5422,14 +5419,20 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 
 	ext = X509_EXTENSION_create_by_NID(NULL, NID_authority_key_identifier, 0,
 					   akid_data);
-	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+	if (!ext) {
 		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to add AuthorityKeyIdentifier extension");
+			   "OpenSSL: Failed to create AuthorityKeyIdentifier extension");
+		goto fail;
+	}
+	if (!exts)
+		exts = sk_X509_EXTENSION_new_null();
+	if (!exts || sk_X509_EXTENSION_push(exts, ext) == 0) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to queue AuthorityKeyIdentifier extension");
 		X509_EXTENSION_free(ext);
 		ext = NULL;
 		goto fail;
 	}
-	X509_EXTENSION_free(ext);
 	ext = NULL;
 	ASN1_OCTET_STRING_free(akid_data);
 	akid_data = NULL;
@@ -5438,26 +5441,61 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	ASN1_OCTET_STRING_free(ski);
 	ski = NULL;
 
-	ski_data = tls_openssl_pubkey_ski(signed_cert);
-	if (!ski_data) {
-		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to compute SubjectKeyIdentifier");
-		goto fail;
+	{
+		unsigned char skid[EVP_MAX_MD_SIZE];
+		unsigned int skid_len = 0;
+
+		if (!X509_pubkey_digest(signed_cert, EVP_sha1(), skid, &skid_len)) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to compute SubjectKeyIdentifier");
+			goto fail;
+		}
+
+		ski_data = ASN1_OCTET_STRING_new();
+		if (!ski_data ||
+		    ASN1_OCTET_STRING_set(ski_data, skid, skid_len) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to create SubjectKeyIdentifier data");
+			goto fail;
+		}
+
+		ski_der_len = i2d_ASN1_OCTET_STRING(ski_data, &ski_der);
+		if (ski_der_len <= 0) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to encode SubjectKeyIdentifier");
+			goto fail;
+		}
+
+		ext = X509_EXTENSION_create_by_NID(NULL, NID_subject_key_identifier,
+						   0, ski_data);
+		if (!ext) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to create SubjectKeyIdentifier extension");
+			goto fail;
+		}
+		if (!exts)
+			exts = sk_X509_EXTENSION_new_null();
+		if (!exts || sk_X509_EXTENSION_push(exts, ext) == 0) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to queue SubjectKeyIdentifier extension");
+			X509_EXTENSION_free(ext);
+			ext = NULL;
+			goto fail;
+		}
+		ext = NULL;
+		ASN1_OCTET_STRING_free(ski_data);
+		ski_data = NULL;
+		OPENSSL_free(ski_der);
+		ski_der = NULL;
 	}
 
-	ext = X509_EXTENSION_create_by_NID(NULL, NID_subject_key_identifier,
-					   0, ski_data);
-	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+	if (!exts || X509v3_add_extensions(signed_cert, exts) != 1) {
 		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to add SubjectKeyIdentifier extension");
-		X509_EXTENSION_free(ext);
-		ext = NULL;
+			   "OpenSSL: Failed to add certificate extensions");
 		goto fail;
 	}
-	X509_EXTENSION_free(ext);
-	ext = NULL;
-	ASN1_OCTET_STRING_free(ski_data);
-	ski_data = NULL;
+	sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
+	exts = NULL;
 
 	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
@@ -5486,9 +5524,11 @@ fail:
 	ASN1_OCTET_STRING_free(ski);
 	ASN1_OCTET_STRING_free(ski_data);
 	OPENSSL_free(akid_der);
+	OPENSSL_free(ski_der);
 	ASN1_OCTET_STRING_free(bc_data);
 	BASIC_CONSTRAINTS_free(bc);
 	OPENSSL_free(bc_der);
+	sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
 	X509_free(signed_cert);
 	X509_free(cert);
 	EVP_PKEY_free(pkey);
