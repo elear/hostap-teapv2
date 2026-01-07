@@ -5235,7 +5235,6 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	X509_REQ *req = NULL;
 	EVP_PKEY *pkey = NULL;
 	EVP_PKEY *req_pkey = NULL;
-	STACK_OF(X509_EXTENSION) *exts = NULL;
 	X509_EXTENSION *ext = NULL;
 	AUTHORITY_KEYID *akid = NULL;
 	ASN1_OCTET_STRING *akid_data = NULL;
@@ -5347,20 +5346,14 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 
 	ext = X509_EXTENSION_create_by_NID(NULL, NID_basic_constraints, 0,
 					   bc_data);
-	if (!ext) {
+	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
 		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to create BasicConstraints extension");
-		goto fail;
-	}
-	if (!exts)
-		exts = sk_X509_EXTENSION_new_null();
-	if (!exts || sk_X509_EXTENSION_push(exts, ext) == 0) {
-		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to queue BasicConstraints extension");
+			   "OpenSSL: Failed to add BasicConstraints extension");
 		X509_EXTENSION_free(ext);
 		ext = NULL;
 		goto fail;
 	}
+	X509_EXTENSION_free(ext);
 	ext = NULL;
 	ASN1_OCTET_STRING_free(bc_data);
 	bc_data = NULL;
@@ -5419,20 +5412,14 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 
 	ext = X509_EXTENSION_create_by_NID(NULL, NID_authority_key_identifier, 0,
 					   akid_data);
-	if (!ext) {
+	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
 		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to create AuthorityKeyIdentifier extension");
-		goto fail;
-	}
-	if (!exts)
-		exts = sk_X509_EXTENSION_new_null();
-	if (!exts || sk_X509_EXTENSION_push(exts, ext) == 0) {
-		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to queue AuthorityKeyIdentifier extension");
+			   "OpenSSL: Failed to add AuthorityKeyIdentifier extension");
 		X509_EXTENSION_free(ext);
 		ext = NULL;
 		goto fail;
 	}
+	X509_EXTENSION_free(ext);
 	ext = NULL;
 	ASN1_OCTET_STRING_free(akid_data);
 	akid_data = NULL;
@@ -5468,34 +5455,20 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 
 		ext = X509_EXTENSION_create_by_NID(NULL, NID_subject_key_identifier,
 						   0, ski_data);
-		if (!ext) {
+		if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
 			wpa_printf(MSG_INFO,
-				   "OpenSSL: Failed to create SubjectKeyIdentifier extension");
-			goto fail;
-		}
-		if (!exts)
-			exts = sk_X509_EXTENSION_new_null();
-		if (!exts || sk_X509_EXTENSION_push(exts, ext) == 0) {
-			wpa_printf(MSG_INFO,
-				   "OpenSSL: Failed to queue SubjectKeyIdentifier extension");
+				   "OpenSSL: Failed to add SubjectKeyIdentifier extension");
 			X509_EXTENSION_free(ext);
 			ext = NULL;
 			goto fail;
 		}
+		X509_EXTENSION_free(ext);
 		ext = NULL;
 		ASN1_OCTET_STRING_free(ski_data);
 		ski_data = NULL;
 		OPENSSL_free(ski_der);
 		ski_der = NULL;
 	}
-
-	if (!exts || X509v3_add_extensions(signed_cert, exts) != 1) {
-		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to add certificate extensions");
-		goto fail;
-	}
-	sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
-	exts = NULL;
 
 	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
@@ -5528,7 +5501,6 @@ fail:
 	ASN1_OCTET_STRING_free(bc_data);
 	BASIC_CONSTRAINTS_free(bc);
 	OPENSSL_free(bc_der);
-	sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
 	X509_free(signed_cert);
 	X509_free(cert);
 	EVP_PKEY_free(pkey);
