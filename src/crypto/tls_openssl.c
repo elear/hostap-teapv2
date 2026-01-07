@@ -5446,7 +5446,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 			goto fail;
 		}
 
-		ext = XV09V3_EXT_i2d(NID_subject_key_identifier,0,ski_data);
+		ext = X509V3_EXT_i2d(NID_subject_key_identifier,0,ski_data);
 
 		if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
 			wpa_printf(MSG_INFO,
