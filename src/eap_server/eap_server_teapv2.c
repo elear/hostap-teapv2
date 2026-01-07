@@ -727,7 +727,7 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 		break;
 	case PKCS7_READY:
 		req = eap_teapv2_add_pkcs7(data, req);
-		req = wbabuf_concat(req,
+		req = wpabuf_concat(req,
 			eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0));
 		data->final_result = 1;
 		break;
