@@ -362,8 +362,8 @@ static int eap_teapv2_process_pkcs7(struct eap_sm *sm,
 	src = wpabuf_alloc_copy(pkcs7, len);
 	if (!src)
 		return -1;
-	wpa_hexdump(MSG_DEBUG, "EAP-TEAPV2: PKCS#7 data",
-		    wpabuf_head(src), wpabuf_len(src));
+	wpa_hexdump_ascii(MSG_DEBUG, "EAP-TEAPV2: PKCS#7 data",
+			  wpabuf_head(src), wpabuf_len(src));
 	pem = crypto_pkcs7_get_certificates(src);
 	if (!pem) {
 		wpa_printf(MSG_INFO,
