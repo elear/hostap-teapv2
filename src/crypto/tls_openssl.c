@@ -5488,7 +5488,6 @@ fail:
 	ASN1_OCTET_STRING_free(ski);
 	ASN1_OCTET_STRING_free(ski_data);
 	OPENSSL_free(akid_der);
-	OPENSSL_free(ski_der);
 	ASN1_OCTET_STRING_free(bc_data);
 	BASIC_CONSTRAINTS_free(bc);
 	OPENSSL_free(bc_der);
