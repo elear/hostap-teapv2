@@ -5466,7 +5466,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		goto fail;
 	}
 
-	der_len = i2d_X509(signed_cert, NULL);
+	der_len = i2d_PKCS7(signed_cert, NULL);
 	if (der_len <= 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: Failed to DER-encode signed certificate");
 		goto fail;
@@ -5475,7 +5475,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	if (!out)
 		goto fail;
 	pos = wpabuf_put(out, der_len);
-	if (i2d_X509(signed_cert, &pos) != der_len) {
+	if (i2d_PKCS7(signed_cert, &pos) != der_len) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: Failed to serialize certificate into DER (wrote different length)");
 		wpabuf_free(out);

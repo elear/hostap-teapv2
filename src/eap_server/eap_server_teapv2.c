@@ -1350,14 +1350,14 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 							     tlv.pkcs10_len);
 			data->pkcs10_expected = false;
 			if (data->pkcs7_cert) {
-				size_t b64_len;
-				char *b64;
+			/*	size_t b64_len;
+				char *b64; */
 
 				eap_teapv2_state(data, PKCS7_READY);
 				wpa_printf(MSG_DEBUG,
 					   "EAP-TEAPV2: Prepared PKCS#7 response (%u bytes)",
 					   (unsigned int) wpabuf_len(data->pkcs7_cert));
-				b64 = base64_encode(wpabuf_head(data->pkcs7_cert),
+/*				b64 = base64_encode(wpabuf_head(data->pkcs7_cert),
 						    wpabuf_len(data->pkcs7_cert),
 						    &b64_len);
 				if (b64) {
@@ -1399,7 +1399,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 						os_free(pem);
 					}
 					os_free(b64);
-				}
+				} */
 			} else {
 				wpa_printf(MSG_INFO,
 					   "EAP-TEAPV2: Failed to prepare PKCS#7 response");
