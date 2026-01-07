@@ -5236,11 +5236,19 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	EVP_PKEY *pkey = NULL;
 	EVP_PKEY *req_pkey = NULL;
 	X509_EXTENSION *ext = NULL;
+	AUTHORITY_KEYID *akid = NULL;
+	ASN1_OCTET_STRING *akid_data = NULL;
 	BASIC_CONSTRAINTS *bc = NULL;
+	ASN1_OCTET_STRING *ski = NULL;
+	ASN1_OCTET_STRING *ski_data = NULL;
+	unsigned char *akid_der = NULL;
+	unsigned char *ski_der = NULL;
 	ASN1_OCTET_STRING *bc_data = NULL;
 	unsigned char *bc_der = NULL;
 	unsigned char *pos;
 	int der_len;
+	int akid_der_len;
+	int ski_der_len;
 	int bc_der_len;
 	const unsigned char *p = pkcs10;
 
@@ -5352,6 +5360,116 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	BASIC_CONSTRAINTS_free(bc);
 	bc = NULL;
 
+	akid = AUTHORITY_KEYID_new();
+	if (!akid) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to allocate AuthorityKeyIdentifier");
+		goto fail;
+	}
+
+	ski = X509_get_ext_d2i(cert, NID_subject_key_identifier, NULL, NULL);
+	if (ski) {
+		akid->keyid = ASN1_OCTET_STRING_dup(ski);
+		if (!akid->keyid) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to copy AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+	} else {
+		unsigned char keyid[EVP_MAX_MD_SIZE];
+		unsigned int keyid_len = 0;
+
+		if (!X509_pubkey_digest(cert, EVP_sha1(), keyid, &keyid_len)) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to compute AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+		akid->keyid = ASN1_OCTET_STRING_new();
+		if (!akid->keyid ||
+		    ASN1_OCTET_STRING_set(akid->keyid, keyid, keyid_len) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+	}
+
+	akid_der_len = i2d_AUTHORITY_KEYID(akid, &akid_der);
+	if (akid_der_len <= 0) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to encode AuthorityKeyIdentifier");
+		goto fail;
+	}
+
+	akid_data = ASN1_OCTET_STRING_new();
+	if (!akid_data ||
+	    ASN1_OCTET_STRING_set(akid_data, akid_der, akid_der_len) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to create AuthorityKeyIdentifier data");
+		goto fail;
+	}
+	OPENSSL_free(akid_der);
+	akid_der = NULL;
+
+	ext = X509_EXTENSION_create_by_NID(NULL, NID_authority_key_identifier, 0,
+					   akid_data);
+	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to add AuthorityKeyIdentifier extension");
+		X509_EXTENSION_free(ext);
+		ext = NULL;
+		goto fail;
+	}
+	X509_EXTENSION_free(ext);
+	ext = NULL;
+	ASN1_OCTET_STRING_free(akid_data);
+	akid_data = NULL;
+	AUTHORITY_KEYID_free(akid);
+	akid = NULL;
+	ASN1_OCTET_STRING_free(ski);
+	ski = NULL;
+
+	{
+		unsigned char skid[EVP_MAX_MD_SIZE];
+		unsigned int skid_len = 0;
+
+		if (!X509_pubkey_digest(signed_cert, EVP_sha1(), skid, &skid_len)) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to compute SubjectKeyIdentifier");
+			goto fail;
+		}
+
+		ski_data = ASN1_OCTET_STRING_new();
+		if (!ski_data ||
+		    ASN1_OCTET_STRING_set(ski_data, skid, skid_len) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to create SubjectKeyIdentifier data");
+			goto fail;
+		}
+
+		ski_der_len = i2d_ASN1_OCTET_STRING(ski_data, &ski_der);
+		if (ski_der_len <= 0) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to encode SubjectKeyIdentifier");
+			goto fail;
+		}
+
+		ext = X509_EXTENSION_create_by_NID(NULL, NID_subject_key_identifier,
+						   0, ski_data);
+		if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to add SubjectKeyIdentifier extension");
+			X509_EXTENSION_free(ext);
+			ext = NULL;
+			goto fail;
+		}
+		X509_EXTENSION_free(ext);
+		ext = NULL;
+		ASN1_OCTET_STRING_free(ski_data);
+		ski_data = NULL;
+		OPENSSL_free(ski_der);
+		ski_der = NULL;
+	}
+
 	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
 		goto fail;
@@ -5374,6 +5492,12 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	}
 
 fail:
+	ASN1_OCTET_STRING_free(akid_data);
+	AUTHORITY_KEYID_free(akid);
+	ASN1_OCTET_STRING_free(ski);
+	ASN1_OCTET_STRING_free(ski_data);
+	OPENSSL_free(akid_der);
+	OPENSSL_free(ski_der);
 	ASN1_OCTET_STRING_free(bc_data);
 	BASIC_CONSTRAINTS_free(bc);
 	OPENSSL_free(bc_der);
