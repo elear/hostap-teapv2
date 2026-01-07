@@ -25,7 +25,7 @@ struct eap_teapv2_data {
 	enum {
 		START, PHASE1, PHASE1B, PHASE2_START, PHASE2_ID,
 		PHASE2_BASIC_AUTH, PHASE2_WAIT_PKCS10, PHASE2_METHOD,
-		CRYPTO_BINDING,
+		CRYPTO_BINDING, PKCS7_READY,
 		FAILURE_SEND_RESULT, SUCCESS_SEND_RESULT, SUCCESS, FAILURE
 	} state;
 
@@ -124,6 +124,8 @@ static const char * eap_teapv2_state_txt(int state)
 		return "PHASE2_METHOD";
 	case CRYPTO_BINDING:
 		return "CRYPTO_BINDING";
+	case PKCS7_READY:
+		return "PKCS7_READY";
 	case FAILURE_SEND_RESULT:
 		return "FAILURE_SEND_RESULT";
 	case SUCCESS_SEND_RESULT:
@@ -721,10 +723,17 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 		if (data->error_code)
 			req = wpabuf_concat(
 				req, eap_teapv2_tlv_error(data->error_code));
+		req = eap_teapv2_add_pkcs7(data, req);
+		break;
+	case PKCS7_READY:
+		req = eap_teapv2_add_pkcs7(data, req);
+		req = eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0);
+		data->final_result = 1;
 		break;
 	case SUCCESS_SEND_RESULT:
 		req = eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0);
 		data->final_result = 1;
+		req = eap_teapv2_add_pkcs7(data, req);
 		break;
 	default:
 		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: %s - unexpected state %d",
@@ -1342,6 +1351,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 				size_t b64_len;
 				char *b64;
 
+				eap_teapv2_state(data, PKCS7_READY);
 				wpa_printf(MSG_DEBUG,
 					   "EAP-TEAPV2: Prepared PKCS#7 response (%u bytes)",
 					   (unsigned int) wpabuf_len(data->pkcs7_cert));
