@@ -5232,6 +5232,7 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	struct wpabuf *out = NULL;
 	BIO *cbio = NULL, *kbio = NULL;
 	X509 *cert = NULL, *signed_cert = NULL;
+	PKCS7 *p7 = NULL;
 	X509_REQ *req = NULL;
 	EVP_PKEY *pkey = NULL;
 	EVP_PKEY *req_pkey = NULL;
@@ -5466,23 +5467,34 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		goto fail;
 	}
 
-	der_len = i2d_PKCS7(signed_cert, NULL);
+	p7 = PKCS7_new();
+	if (!p7 ||
+	    !PKCS7_set_type(p7, NID_pkcs7_signed) ||
+	    !PKCS7_content_new(p7, NID_pkcs7_data) ||
+	    !PKCS7_add_certificate(p7, signed_cert) ||
+	    (cert && !PKCS7_add_certificate(p7, cert))) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to build PKCS#7");
+		goto fail;
+	}
+
+	der_len = i2d_PKCS7(p7, NULL);
 	if (der_len <= 0) {
-		wpa_printf(MSG_INFO, "OpenSSL: Failed to DER-encode signed certificate");
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to DER-encode PKCS#7");
 		goto fail;
 	}
 	out = wpabuf_alloc(der_len);
 	if (!out)
 		goto fail;
 	pos = wpabuf_put(out, der_len);
-	if (i2d_PKCS7(signed_cert, &pos) != der_len) {
+	if (i2d_PKCS7(p7, &pos) != der_len) {
 		wpa_printf(MSG_INFO,
-			   "OpenSSL: Failed to serialize certificate into DER (wrote different length)");
+			   "OpenSSL: Failed to serialize PKCS#7 into DER (wrote different length)");
 		wpabuf_free(out);
 		out = NULL;
 	}
 
 fail:
+	PKCS7_free(p7);
 	ASN1_OCTET_STRING_free(akid_data);
 	AUTHORITY_KEYID_free(akid);
 	ASN1_OCTET_STRING_free(ski);
