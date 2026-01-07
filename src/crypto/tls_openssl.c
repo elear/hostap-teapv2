@@ -5384,6 +5384,8 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 				   "OpenSSL: Failed to compute AuthorityKeyIdentifier keyid");
 			goto fail;
 		}
+		wpa_hexdump(MSG_DEBUG, "OpenSSL: AuthorityKeyIdentifier keyid",
+			    keyid, keyid_len);
 		akid->keyid = ASN1_OCTET_STRING_new();
 		if (!akid->keyid ||
 		    ASN1_OCTET_STRING_set(akid->keyid, keyid, keyid_len) != 1) {
@@ -5437,6 +5439,8 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 				   "OpenSSL: Failed to compute SubjectKeyIdentifier");
 			goto fail;
 		}
+		wpa_hexdump(MSG_DEBUG, "OpenSSL: SubjectKeyIdentifier", skid,
+			    skid_len);
 
 		ski_data = ASN1_OCTET_STRING_new();
 		if (!ski_data ||
