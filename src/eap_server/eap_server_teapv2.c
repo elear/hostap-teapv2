@@ -406,7 +406,7 @@ eap_teapv2_add_pkcs7(struct eap_teapv2_data *data, struct wpabuf *msg)
 {
 	struct wpabuf *tlv;
 
-	if (!msg || !data || !data->pkcs7_cert || data->pkcs10_expected)
+	if (!data || !data->pkcs7_cert || data->pkcs10_expected)
 		return msg;
 	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Generating PKCS7 TLV");
 	tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) +
@@ -421,8 +421,10 @@ eap_teapv2_add_pkcs7(struct eap_teapv2_data *data, struct wpabuf *msg)
 	wpabuf_put_buf(tlv, data->pkcs7_cert);
 	wpabuf_free(data->pkcs7_cert);
 	data->pkcs7_cert = NULL;
-
-	return wpabuf_concat(msg, tlv);
+	if (msg)
+		return wpabuf_concat(msg, tlv);
+	else
+		return tlv;
 }
 
 
