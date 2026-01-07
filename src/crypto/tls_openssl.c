@@ -5242,13 +5242,11 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	ASN1_OCTET_STRING *ski = NULL;
 	ASN1_OCTET_STRING *ski_data = NULL;
 	unsigned char *akid_der = NULL;
-	unsigned char *ski_der = NULL;
 	ASN1_OCTET_STRING *bc_data = NULL;
 	unsigned char *bc_der = NULL;
 	unsigned char *pos;
 	int der_len;
 	int akid_der_len;
-	int ski_der_len;
 	int bc_der_len;
 	const unsigned char *p = pkcs10;
 
@@ -5439,8 +5437,6 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 				   "OpenSSL: Failed to compute SubjectKeyIdentifier");
 			goto fail;
 		}
-		wpa_hexdump(MSG_DEBUG, "OpenSSL: SubjectKeyIdentifier", skid,
-			    skid_len);
 
 		ski_data = ASN1_OCTET_STRING_new();
 		if (!ski_data ||
@@ -5450,15 +5446,8 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 			goto fail;
 		}
 
-		ski_der_len = i2d_ASN1_OCTET_STRING(ski_data, &ski_der);
-		if (ski_der_len <= 0) {
-			wpa_printf(MSG_INFO,
-				   "OpenSSL: Failed to encode SubjectKeyIdentifier");
-			goto fail;
-		}
+		ext = XV09V3_EXT_i2d(NID_subject_key_identifier,0,ski_data);
 
-		ext = X509_EXTENSION_create_by_NID(NULL, NID_subject_key_identifier,
-						   0, ski_data);
 		if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to add SubjectKeyIdentifier extension");
@@ -5470,8 +5459,6 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		ext = NULL;
 		ASN1_OCTET_STRING_free(ski_data);
 		ski_data = NULL;
-		OPENSSL_free(ski_der);
-		ski_der = NULL;
 	}
 
 	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
