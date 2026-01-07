@@ -5236,9 +5236,12 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	EVP_PKEY *pkey = NULL;
 	EVP_PKEY *req_pkey = NULL;
 	X509_EXTENSION *ext = NULL;
-	X509V3_CTX ctx;
+	BASIC_CONSTRAINTS *bc = NULL;
+	ASN1_OCTET_STRING *bc_data = NULL;
+	unsigned char *bc_der = NULL;
 	unsigned char *pos;
 	int der_len;
+	int bc_der_len;
 	const unsigned char *p = pkcs10;
 
 	(void) ssl_ctx;
@@ -5307,16 +5310,47 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 		goto fail;
 	}
 
-	X509V3_set_ctx(&ctx, cert, signed_cert, req, NULL, 0);
-	ext = X509V3_EXT_conf_nid(NULL, &ctx, NID_basic_constraints,
-				  "CA:FALSE");
+	bc = BASIC_CONSTRAINTS_new();
+	if (!bc) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to allocate BasicConstraints");
+		goto fail;
+	}
+	bc->ca = 0;
+	bc->pathlen = NULL;
+
+	bc_der_len = i2d_BASIC_CONSTRAINTS(bc, &bc_der);
+	if (bc_der_len <= 0) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to encode BasicConstraints");
+		goto fail;
+	}
+
+	bc_data = ASN1_OCTET_STRING_new();
+	if (!bc_data ||
+	    ASN1_OCTET_STRING_set(bc_data, bc_der, bc_der_len) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to create BasicConstraints data");
+		goto fail;
+	}
+	OPENSSL_free(bc_der);
+	bc_der = NULL;
+
+	ext = X509_EXTENSION_create_by_NID(NULL, NID_basic_constraints, 0,
+					   bc_data);
 	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: Failed to add BasicConstraints extension");
 		X509_EXTENSION_free(ext);
+		ext = NULL;
 		goto fail;
 	}
 	X509_EXTENSION_free(ext);
+	ext = NULL;
+	ASN1_OCTET_STRING_free(bc_data);
+	bc_data = NULL;
+	BASIC_CONSTRAINTS_free(bc);
+	bc = NULL;
 
 	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
 		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
@@ -5340,6 +5374,9 @@ struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 	}
 
 fail:
+	ASN1_OCTET_STRING_free(bc_data);
+	BASIC_CONSTRAINTS_free(bc);
+	OPENSSL_free(bc_der);
 	X509_free(signed_cert);
 	X509_free(cert);
 	EVP_PKEY_free(pkey);
