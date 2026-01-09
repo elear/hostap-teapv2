@@ -1230,7 +1230,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		goto send_resp;
 	}
 
-	if (tlv.iresult == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
+	if (tlv.iresult == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding &&
+	    data->inner_method_done && data->phase2_success) {
 		/* Intermediate-Result TLV indicating success, but no
 		 * Crypto-Binding TLV */
 		wpa_printf(MSG_DEBUG,
@@ -1241,7 +1242,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	}
 
 	if (!data->iresult_verified && !data->result_success_done &&
-	    tlv.result == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
+	    tlv.result == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding &&
+	    data->inner_method_done && data->phase2_success) {
 		/* Result TLV indicating success, but no Crypto-Binding TLV */
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Result TLV indicating success, but no Crypto-Binding TLV");
@@ -1257,6 +1259,15 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 			   "EAP-TEAPV2: Inner EAP method exchange completed, but no Intermediate-Result TLV included");
 		failed = 1;
 		error = TEAPV2_ERROR_TUNNEL_COMPROMISE_ERROR;
+		goto done;
+	}
+
+	if (tlv.crypto_binding &&
+	    (!data->inner_method_done || !data->phase2_success)) {
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: Unexpected Crypto-Binding TLV before inner EAP success");
+		failed = 1;
+		error = TEAPV2_ERROR_UNEXPECTED_TLVS_EXCHANGED;
 		goto done;
 	}
 
@@ -1400,7 +1411,8 @@ done:
 	}
 
 	if (resp && tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
-	    (tlv.crypto_binding || data->iresult_verified) &&
+	    ((!data->inner_method_done || !data->phase2_success) ||
+	     (tlv.crypto_binding || data->iresult_verified)) &&
 	    data->phase2_success) {
 		/* Successfully completed Phase 2 */
 		wpa_printf(MSG_DEBUG,
