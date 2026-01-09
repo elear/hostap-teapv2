@@ -55,7 +55,6 @@ struct eap_teapv2_data {
 	unsigned int basic_auth_not_done:1;
 	unsigned int inner_eap_not_done:1;
 	int skipped_inner_auth;
-	bool inner_eap_success;
 	struct wpabuf *pending_phase2_resp;
 	struct wpabuf *server_outer_tlvs;
 	struct wpabuf *peer_outer_tlvs;
@@ -464,7 +463,6 @@ static struct wpabuf * eap_teapv2_build_phase2_req(struct eap_sm *sm,
 
 	if (sm->cfg->eap_teapv2_auth == 1) {
 		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Initiate Basic-Password-Auth");
-		data->inner_eap_success = false;
 		data->basic_auth_not_done = 1;
 		req = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr));
 		if (!req) {
@@ -477,7 +475,6 @@ static struct wpabuf * eap_teapv2_build_phase2_req(struct eap_sm *sm,
 	}
 
 	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Initiate inner EAP method");
-	data->inner_eap_success = false;
 	data->inner_eap_not_done = 1;
 	if (!data->phase2_priv) {
 		wpa_printf(MSG_DEBUG,
@@ -673,37 +670,8 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 					   "EAP-TEAPV2: Try to start Phase 2");
 				res = eap_teapv2_process_phase2_start(sm, data);
 				if (res == 1) {
-					switch (data->state) {
-					case CRYPTO_BINDING:
-						req = eap_teapv2_build_crypto_binding(
-							sm, data);
-						break;
-					case PHASE2_ID:
-					case PHASE2_BASIC_AUTH:
-					case PHASE2_WAIT_PKCS10:
-					case PHASE2_METHOD:
-						req = eap_teapv2_build_phase2_req(
-							sm, data, id);
-						break;
-					case FAILURE_SEND_RESULT:
-						req = eap_teapv2_tlv_result(
-							TEAPV2_STATUS_FAILURE, 0);
-						if (data->error_code)
-							req = wpabuf_concat(
-								req, eap_teapv2_tlv_error(
-									data->error_code));
-						req = eap_teapv2_add_pkcs7(data, req);
-						break;
-					case PKCS7_READY:
-					case SUCCESS_SEND_RESULT:
-						req = eap_teapv2_tlv_result(
-							TEAPV2_STATUS_SUCCESS, 0);
-						data->final_result = 1;
-						req = eap_teapv2_add_pkcs7(data, req);
-						break;
-					default:
-						break;
-					}
+					req = eap_teapv2_build_crypto_binding(
+						sm, data);
 					piggyback = 1;
 					break;
 				}
@@ -926,7 +894,6 @@ static void eap_teapv2_process_phase2_response(struct eap_sm *sm,
 		return;
 	}
 
-	data->inner_eap_success = true;
 	switch (data->state) {
 	case PHASE2_ID:
 		if (!eap_teapv2_valid_id_type(sm, data, id_type)) {
@@ -1124,11 +1091,8 @@ static void eap_teapv2_process_basic_auth_resp(struct eap_sm *sm,
 	if (sm->cfg->eap_teapv2_id != EAP_TEAPV2_ID_REQUIRE_USER_AND_MACHINE ||
 	    data->cur_id_type == TEAPV2_IDENTITY_TYPE_MACHINE)
 		data->basic_auth_not_done = 0;
+	eap_teapv2_state(data, CRYPTO_BINDING);
 	eap_teapv2_update_icmk(sm, data);
-	if (data->basic_auth_not_done)
-		eap_teapv2_state(data, PHASE2_BASIC_AUTH);
-	else
-		eap_teapv2_state(data, SUCCESS_SEND_RESULT);
 }
 
 
@@ -1614,8 +1578,7 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 						 data->simck_emsk,
 						 data->cmk_emsk))
 				return -1;
-			data->inner_eap_success = false;
-			eap_teapv2_state(data, SUCCESS_SEND_RESULT);
+			eap_teapv2_state(data, CRYPTO_BINDING);
 			return 1;
 		} else if (sm->cfg->eap_teapv2_auth == 1) {
 			eap_teapv2_state(data, PHASE2_BASIC_AUTH);
