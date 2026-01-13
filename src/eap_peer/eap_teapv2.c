@@ -57,7 +57,6 @@ struct eap_teapv2_data {
 	int simck_idx;
 	bool cmk_emsk_available;
 	bool pkcs10_requested;
-	bool pkcs7_success;
 
 	struct wpabuf *pending_phase2_req;
 	struct wpabuf *pending_resp;
@@ -464,7 +463,6 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	forced_memzero(data->simck, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
-	data->pkcs7_success = false;
 }
 
 
@@ -527,7 +525,6 @@ static int eap_teapv2_init_phase2_method(struct eap_sm *sm,
 {
 	data->inner_method_done = 0;
 	data->iresult_verified = 0;
-	data->pkcs7_success = false;
 	data->phase2_method =
 		eap_peer_get_eap_method(data->phase2_type.vendor,
 					data->phase2_type.method);
@@ -1337,8 +1334,6 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		failed = 1;
 		goto done;
 	}
-	if (tlv.pkcs7)
-		data->pkcs7_success = true;
 
 	if (tlv.basic_auth_req) {
 		tmp = eap_teapv2_process_basic_auth_req(sm, data,
@@ -1405,9 +1400,8 @@ done:
 	}
 
 	if (resp && tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
-	    (tlv.crypto_binding || data->iresult_verified ||
-	     data->pkcs7_success) &&
-	    (data->phase2_success || data->pkcs7_success)) {
+	    (tlv.crypto_binding || data->iresult_verified) &&
+	    data->phase2_success) {
 		/* Successfully completed Phase 2 */
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Authentication completed successfully");
@@ -1873,7 +1867,6 @@ static void * eap_teapv2_init_for_reauth(struct eap_sm *sm, void *priv)
 	data->inner_method_done = 0;
 	data->result_success_done = 0;
 	data->iresult_verified = 0;
-	data->pkcs7_success = false;
 	data->done_on_tx_completion = 0;
 	data->resuming = 1;
 	data->simck_idx = 0;
