@@ -57,6 +57,7 @@ struct eap_teapv2_data {
 	int simck_idx;
 	bool cmk_emsk_available;
 	bool pkcs10_requested;
+	bool pkcs7_success;
 
 	struct wpabuf *pending_phase2_req;
 	struct wpabuf *pending_resp;
@@ -463,6 +464,7 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	forced_memzero(data->simck, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
+	data->pkcs7_success = false;
 }
 
 
@@ -525,6 +527,7 @@ static int eap_teapv2_init_phase2_method(struct eap_sm *sm,
 {
 	data->inner_method_done = 0;
 	data->iresult_verified = 0;
+	data->pkcs7_success = false;
 	data->phase2_method =
 		eap_peer_get_eap_method(data->phase2_type.vendor,
 					data->phase2_type.method);
@@ -1877,6 +1880,7 @@ static void * eap_teapv2_init_for_reauth(struct eap_sm *sm, void *priv)
 	data->inner_method_done = 0;
 	data->result_success_done = 0;
 	data->iresult_verified = 0;
+	data->pkcs7_success = false;
 	data->done_on_tx_completion = 0;
 	data->resuming = 1;
 	data->simck_idx = 0;
