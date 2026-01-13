@@ -1400,8 +1400,9 @@ done:
 	}
 
 	if (resp && tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
-	    (tlv.crypto_binding || data->iresult_verified) &&
-	    data->phase2_success) {
+	    (tlv.crypto_binding || data->iresult_verified ||
+	     data->pkcs7_success) &&
+	    (data->phase2_success || data->pkcs7_success)) {
 		/* Successfully completed Phase 2 */
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Authentication completed successfully");
