@@ -1334,6 +1334,16 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		failed = 1;
 		goto done;
 	}
+	if (tlv.pkcs7 && !data->pkcs7_success) {
+		data->pkcs7_success = true;
+		if (eap_teapv2_derive_msk(data) < 0 ||
+		    eap_teapv2_session_id(data) < 0) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to derive keys after PKCS#7");
+			failed = 1;
+			goto done;
+		}
+	}
 
 	if (tlv.basic_auth_req) {
 		tmp = eap_teapv2_process_basic_auth_req(sm, data,
