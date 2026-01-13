@@ -1792,6 +1792,7 @@ static u8 * eap_teapv2_getKey(struct eap_sm *sm, void *priv, size_t *len)
 	if (eap_teapv2_derive_eap_msk(data->tls_cs, data->simck,
 				    eapKeyData) < 0) {
 		os_free(eapKeyData);
+		wpa_printf(MSG_ERROR,"TEAPv2: could not derive MSK");
 		return NULL;
 	}
 	*len = EAP_TEAPV2_KEY_LEN;
