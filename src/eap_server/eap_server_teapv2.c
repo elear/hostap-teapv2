@@ -1626,6 +1626,7 @@ static void eap_teapv2_process_msg(struct eap_sm *sm, void *priv,
 	case PHASE2_WAIT_PKCS10:
 	case PHASE2_METHOD:
 	case CRYPTO_BINDING:
+	case PKCS7_READY:
 	case SUCCESS_SEND_RESULT:
 		eap_teapv2_process_phase2(sm, data, data->ssl.tls_in);
 		break;
