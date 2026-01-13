@@ -732,6 +732,7 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 		req = wpabuf_concat(req,
 			eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0));
 		data->final_result = 1;
+		eap_teapv2_state(data,SUCCESS_SEND_RESULT);
 		break;
 	case SUCCESS_SEND_RESULT:
 		req = eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0);
