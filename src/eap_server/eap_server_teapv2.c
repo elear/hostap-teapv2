@@ -1430,7 +1430,8 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 					    tlv.identity_type);
 	}
 
-	if (data->state == SUCCESS_SEND_RESULT &&
+	if ((data->state == SUCCESS_SEND_RESULT ||
+	     data->state == PKCS7_READY) &&
 	    tlv.result == TEAPV2_STATUS_SUCCESS) {
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Peer agreed with final success - authentication completed");
