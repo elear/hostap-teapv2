@@ -937,6 +937,10 @@ SM_STATE(EAP, METHOD)
 		eap_sm_free_key(sm);
 		sm->eapKeyData = sm->m->getKey(sm, sm->eap_method_priv,
 					       &sm->eapKeyDataLen);
+		if (sm->eapKeyData)
+			wpa_printf(MSG_DEBUG,
+				   "EAP: Keying material available (len=%zu)",
+				   sm->eapKeyDataLen);
 		os_free(sm->eapSessionId);
 		sm->eapSessionId = NULL;
 		if (sm->m->getSessionId) {
