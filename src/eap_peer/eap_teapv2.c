@@ -389,6 +389,8 @@ static int eap_teapv2_process_pkcs7(struct eap_sm *sm,
 	wpa_printf(MSG_INFO,
 		   "EAP-TEAPV2: Installed %s certificate from PKCS#7",
 		   sm->use_machine_cred ? "machine" : "user");
+	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Installed certificate (PEM)\n%.*s",
+		   (int) wpabuf_len(pem), (const char *) wpabuf_head(pem));
 	data->pkcs10_requested = false;
 	ret = 0;
 
@@ -1389,7 +1391,6 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	}
 
 done:
-	wpa_printf(MSG_DEBUG,"TEAPv2: We should be done.");
 	if (failed) {
 		tmp = eap_teapv2_tlv_result(TEAPV2_STATUS_FAILURE, 0);
 		resp = wpabuf_concat(tmp, resp);
@@ -1425,7 +1426,8 @@ done:
 		data->on_tx_completion = METHOD_DONE;
 		ret->decision = DECISION_UNCOND_SUCC;
 	} else {
-		wpa_printf(MSG_DEBUG, "TEAPV2: could not set ret->decision: %d, %d, %d", failed, data->phase2_success, data->pkcs7_success);
+		wpa_printf(MSG_DEBUG, "TEAPV2: could not set ret->decision: fail = %d, phase2_success = %d, pkcs7_success = %d",
+			failed, data->phase2_success, data->pkcs7_success);
 	}
 
 	if (!resp) {
