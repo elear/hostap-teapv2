@@ -1389,6 +1389,7 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	}
 
 done:
+	wpa_printf(MSG_DEBUG,"TEAPv2: We should be done.");
 	if (failed) {
 		tmp = eap_teapv2_tlv_result(TEAPV2_STATUS_FAILURE, 0);
 		resp = wpabuf_concat(tmp, resp);
@@ -1409,6 +1410,8 @@ done:
 		tmp = eap_teapv2_tlv_result((!failed && data->phase2_success) ?
 					  TEAPV2_STATUS_SUCCESS :
 					  TEAPV2_STATUS_FAILURE, 1);
+		if (tlv.irresult == TEAPV2_STATUS_FAILURE)
+			wpa_printf("TEAPV2: Intermediate status = FAIL");
 		resp = wpabuf_concat(tmp, resp);
 	}
 
@@ -1421,6 +1424,8 @@ done:
 		ret->methodState = METHOD_MAY_CONT;
 		data->on_tx_completion = METHOD_DONE;
 		ret->decision = DECISION_UNCOND_SUCC;
+	} else {
+		wpa_printf(MSG_DEBUG, "TEAPV2: could not set ret->decision: %d, %d", failed, data->phase2_success);
 	}
 
 	if (!resp) {
