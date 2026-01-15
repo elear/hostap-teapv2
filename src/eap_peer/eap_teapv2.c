@@ -1415,9 +1415,9 @@ done:
 		resp = wpabuf_concat(tmp, resp);
 	}
 
-	if (resp && tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
+	if (resp && (tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
 	    (tlv.crypto_binding || data->iresult_verified) &&
-	    data->phase2_success) {
+	    data->phase2_success) || data->pkcs7_success) {
 		/* Successfully completed Phase 2 */
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Authentication completed successfully");
@@ -1425,7 +1425,7 @@ done:
 		data->on_tx_completion = METHOD_DONE;
 		ret->decision = DECISION_UNCOND_SUCC;
 	} else {
-		wpa_printf(MSG_DEBUG, "TEAPV2: could not set ret->decision: %d, %d", failed, data->phase2_success);
+		wpa_printf(MSG_DEBUG, "TEAPV2: could not set ret->decision: %d, %d, %d", failed, data->phase2_success, data->pkcs7_success);
 	}
 
 	if (!resp) {
