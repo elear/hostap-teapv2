@@ -161,7 +161,7 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     cert_data = dev[0].request("GET_BLOB " + cert_blob)
     if not cert_data:
         raise Exception("Failed to read PKCS#7 certificate blob")
-    if "BEGIN CERTIFICATE" not in cert_decoded:
+    if "BEGIN CERTIFICATE" not in cert_data:
         raise Exception("Stored PKCS#7 certificate blob missing certificate")
 
 def test_eap_teap_eap_pwd(dev, apdev):
