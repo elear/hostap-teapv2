@@ -167,7 +167,7 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     except Exception as e:
         raise Exception("Failed to decode PKCS#7 certificate blob: " + str(e))
     if "BEGIN CERTIFICATE" not in cert_decoded:
-        raise Exception("Stored PKCS#7 certificate blob missing certificate: " + cert_decoded)
+        raise Exception("Stored PKCS#7 certificate blob missing certificate")
 
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""
