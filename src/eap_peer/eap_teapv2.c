@@ -1410,7 +1410,7 @@ done:
 		tmp = eap_teapv2_tlv_result((!failed && data->phase2_success) ?
 					  TEAPV2_STATUS_SUCCESS :
 					  TEAPV2_STATUS_FAILURE, 1);
-		if (tlv.irresult == TEAPV2_STATUS_FAILURE)
+		if (tlv.iresult == TEAPV2_STATUS_FAILURE)
 			wpa_printf(MSG_ERROR, "TEAPV2: Intermediate status = FAIL");
 		resp = wpabuf_concat(tmp, resp);
 	}
