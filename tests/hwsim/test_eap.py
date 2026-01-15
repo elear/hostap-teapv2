@@ -4,6 +4,7 @@
 # This software may be distributed under the terms of the BSD license.
 # See README for more details.
 
+import base64
 import logging
 import random
 logger = logging.getLogger()
