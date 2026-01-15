@@ -129,6 +129,7 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
                 anonymous_identity="TEAPV2",
                 ca_cert="auth_serv/ca.pem",
                 client_cert=client_cert, private_key=client_key)
+    dev[0].save_config()
 
     blobs = dev[0].request("LIST_BLOBS")
     blob_list = []
