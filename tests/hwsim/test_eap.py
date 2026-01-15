@@ -158,7 +158,7 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     if not cert_blob:
         raise Exception("PKCS#7 certificate blob not stored")
 
-    cert_data = dev[0].request("GET blob " + cert_blob)
+    cert_data = dev[0].request("GET_BLOB " + cert_blob)
     if not cert_data:
         raise Exception("Failed to read PKCS#7 certificate blob")
     try:
