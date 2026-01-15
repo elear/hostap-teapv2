@@ -129,7 +129,15 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
                 anonymous_identity="TEAPV2",
                 ca_cert="auth_serv/ca.pem",
                 client_cert=client_cert, private_key=client_key)
+    if "OK" not in dev[0].request("SET update_config 1"):
+        raise Exception("Failed to set update_config")
     dev[0].save_config()
+    conf_file = os.path.join(params['logdir'],
+                             "p2p%s.conf" % dev[0].ifname[4:])
+    with open(conf_file, "r") as f:
+        conf_data = f.read()
+    if "update_config=1" not in conf_data:
+        raise Exception("update_config=1 not stored in config file")
 
     blobs = dev[0].request("LIST_BLOBS")
     blob_list = []
