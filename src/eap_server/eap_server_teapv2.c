@@ -70,6 +70,7 @@ struct eap_teapv2_data {
 	struct wpabuf *pkcs7_cert;
 	struct wpabuf *pkcs10_csr;
 	bool pkcs10_expected;
+	struct wpabuf *trusted_server_root;
 };
 
 
@@ -77,6 +78,53 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 					 struct eap_teapv2_data *data);
 static int eap_teapv2_phase2_init(struct eap_sm *sm, struct eap_teapv2_data *data,
 				int vendor, enum eap_type eap_type);
+
+static struct wpabuf *
+eap_teapv2_load_trusted_server_root(const char *path)
+{
+	u8 *buf, *der;
+	size_t len, der_len;
+	char *pos, *end;
+	struct wpabuf *cert;
+	const char *pem_begin = "-----BEGIN CERTIFICATE-----";
+	const char *pem_end = "-----END CERTIFICATE-----";
+
+	buf = (u8 *) os_readfile(path, &len);
+	if (!buf) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Failed to read trusted server root '%s'",
+			   path);
+		return NULL;
+	}
+
+	pos = os_strstr((char *) buf, pem_begin);
+	if (pos) {
+		pos += os_strlen(pem_begin);
+		end = os_strstr(pos, pem_end);
+		if (!end) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: No PEM end tag in trusted server root '%s'",
+				   path);
+			os_free(buf);
+			return NULL;
+		}
+		der = base64_decode(pos, end - pos, &der_len);
+		os_free(buf);
+		if (!der) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to decode PEM trusted server root '%s'",
+				   path);
+			return NULL;
+		}
+		cert = wpabuf_alloc_copy(der, der_len);
+		os_free(der);
+		return cert;
+	}
+
+	cert = wpabuf_alloc_copy(buf, len);
+	os_free(buf);
+	return cert;
+}
 
 static bool eap_teapv2_cert_near_expiry(struct eap_sm *sm,
 					struct eap_teapv2_data *data)
@@ -268,6 +316,16 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 		return NULL;
 	}
 
+	if (sm->cfg->eap_teapv2_trusted_server_root) {
+		data->trusted_server_root =
+			eap_teapv2_load_trusted_server_root(
+				sm->cfg->eap_teapv2_trusted_server_root);
+		if (!data->trusted_server_root) {
+			eap_teapv2_reset(sm, data);
+			return NULL;
+		}
+	}
+
 	return data;
 }
 
@@ -288,6 +346,7 @@ static void eap_teapv2_reset(struct eap_sm *sm, void *priv)
 	wpabuf_free(data->pending_phase2_resp);
 	wpabuf_free(data->server_outer_tlvs);
 	wpabuf_free(data->peer_outer_tlvs);
+	wpabuf_free(data->trusted_server_root);
 	os_free(data->identity);
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
@@ -398,6 +457,30 @@ eap_teapv2_add_request_action(struct eap_teapv2_data *data,
 	data->request_pkcs10 = false;
 	data->pkcs10_expected = true;
 	eap_teapv2_state(data, PHASE2_WAIT_PKCS10);
+	return wpabuf_concat(msg, tlv);
+}
+
+static struct wpabuf *
+eap_teapv2_add_trusted_server_root(struct eap_teapv2_data *data,
+				   struct wpabuf *msg)
+{
+	struct wpabuf *tlv;
+
+	if (!msg || !data->trusted_server_root)
+		return msg;
+
+	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Add Trusted-Server-Root TLV");
+	tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) + 2 +
+			   wpabuf_len(data->trusted_server_root));
+	if (!tlv) {
+		wpabuf_free(msg);
+		return NULL;
+	}
+	eap_teapv2_put_tlv_hdr(tlv, TEAPV2_TLV_TRUSTED_SERVER_ROOT,
+			       2 + wpabuf_len(data->trusted_server_root));
+	wpabuf_put_be16(tlv, 1);
+	wpabuf_put_buf(tlv, data->trusted_server_root);
+
 	return wpabuf_concat(msg, tlv);
 }
 
@@ -590,6 +673,7 @@ static struct wpabuf * eap_teapv2_build_crypto_binding(
 		    cb->msk_compound_mac, sizeof(cb->msk_compound_mac));
 
 	data->check_crypto_binding = true;
+	buf = eap_teapv2_add_trusted_server_root(data, buf);
 	buf = eap_teapv2_add_request_action(data, buf);
 	return eap_teapv2_add_pkcs7(data, buf);
 }

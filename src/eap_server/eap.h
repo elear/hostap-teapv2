@@ -220,6 +220,7 @@ struct eap_config {
 	} eap_teapv2_id;
 	int eap_teapv2_method_sequence;
 	int eap_teapv2_request_action_pkcs10;
+	char *eap_teapv2_trusted_server_root;
 
 	/**
 	 * eap_sim_aka_result_ind - EAP-SIM/AKA protected success indication

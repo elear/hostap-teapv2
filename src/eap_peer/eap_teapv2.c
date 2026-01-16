@@ -128,6 +128,57 @@ static int eap_teapv2_store_blob(struct eap_sm *sm,
 	return 0;
 }
 
+static void
+eap_teapv2_process_trusted_server_root(struct eap_sm *sm, const u8 *buf,
+				       size_t len)
+{
+	struct eap_peer_cert_config *cert_cfg;
+	u16 format;
+	const u8 *cred;
+	size_t cred_len;
+	char *ref = NULL;
+
+	if (!buf || len < 2)
+		return;
+
+	format = WPA_GET_BE16(buf);
+	cred = buf + 2;
+	cred_len = len - 2;
+	if (cred_len == 0)
+		return;
+
+	cert_cfg = eap_teapv2_current_cert_config(sm);
+	if (!cert_cfg) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: No certificate configuration for Trusted-Server-Root TLV");
+		return;
+	}
+
+	if (format == 1) {
+		if (eap_teapv2_store_blob(sm, cert_cfg, "trusted-root",
+					  cred, cred_len,
+					  &cert_cfg->ca_cert) < 0) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to store Trusted-Server-Root");
+			return;
+		}
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: Installed Trusted-Server-Root as trust anchor");
+	} else {
+		if (eap_teapv2_store_blob(sm, cert_cfg, "trusted-root",
+					  cred, cred_len, &ref) < 0) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to store Trusted-Server-Root");
+			return;
+		}
+		os_free(ref);
+	}
+
+	wpa_printf(MSG_DEBUG,
+		   "EAP-TEAPV2: Stored Trusted-Server-Root (format=%u, len=%u)",
+		   format, (unsigned int) cred_len);
+}
+
 
 static int eap_teapv2_set_csr_subject_from_identity(struct eap_sm *sm,
 						    struct crypto_csr *csr)
@@ -1222,6 +1273,11 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		/* Parsing rejected the message - send out an error response */
 		goto send_resp;
 	}
+
+	if (tlv.trusted_server_root)
+		eap_teapv2_process_trusted_server_root(
+			sm, tlv.trusted_server_root,
+			tlv.trusted_server_root_len);
 
 	if (tlv.result == TEAPV2_STATUS_FAILURE) {
 		/* Server indicated failure - respond similarly per

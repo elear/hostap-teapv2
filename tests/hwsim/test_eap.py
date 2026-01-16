@@ -42,7 +42,8 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
                              eap_teapv2_separate_result=None,
                              eap_teapv2_id=None,
                              eap_teapv2_method_sequence=None,
-                             eap_teapv2_request_action_pkcs10=None):
+                             eap_teapv2_request_action_pkcs10=None,
+                             eap_teapv2_trusted_server_root=None):
     params = int_eap_server_params()
     params['eap_fast_a_id'] = "101112131415161718191a1b1c1dff00"
     params['eap_fast_a_id_info'] = "test server 0"
@@ -57,6 +58,9 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
     if eap_teapv2_request_action_pkcs10 is not None:
         params['eap_teapv2_request_action_pkcs10'] = \
             eap_teapv2_request_action_pkcs10
+    if eap_teapv2_trusted_server_root is not None:
+        params['eap_teapv2_trusted_server_root'] = \
+            eap_teapv2_trusted_server_root
     return params
 
 def teapv2_generate_near_expiry_cert(logdir):
@@ -114,6 +118,37 @@ def test_eap_teapv2_eap_mschapv2(dev, apdev):
                 anonymous_identity="TEAPV2", password="password",
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
     eap_reauth(dev[0], "TEAPV2")
+
+def test_eap_teapv2_trusted_server_root(dev, apdev):
+    """EAP-TEAPV2 Trusted-Server-Root TLV"""
+    check_eap_capa(dev[0], "TEAPV2")
+    params = int_teapv2_server_params(
+        eap_teapv2_trusted_server_root="auth_serv/ca.pem")
+    hapd = hostapd.add_ap(apdev[0], params)
+    net_id = eap_connect(dev[0], hapd, "TEAPV2", "user",
+                         anonymous_identity="TEAPV2", password="password",
+                         ca_cert="auth_serv/ca.pem",
+                         phase2="auth=MSCHAPV2")
+
+    blobs = dev[0].request("LIST_BLOBS")
+    blob_list = []
+    for b in blobs.splitlines():
+        b = b.strip()
+        if not b:
+            continue
+        if b.startswith("blob "):
+            b = b[5:]
+        blob_list.append(b)
+    trust_blob = next((b for b in blob_list
+                       if b.startswith("teapv2-trusted-root-")), None)
+    if not trust_blob:
+        raise Exception("Trusted-Server-Root blob not stored")
+
+    ca_cert = dev[0].request("GET_NETWORK %d ca_cert" % net_id)
+    if not ca_cert.startswith("blob://"):
+        raise Exception("Trusted-Server-Root not configured as trust anchor")
+    if ca_cert[7:] != trust_blob:
+        raise Exception("Unexpected trust anchor reference: " + ca_cert)
 
 def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     """EAP-TEAPV2 PKCS#10 Request-Action when client cert near expiry"""
