@@ -149,9 +149,9 @@ def test_eap_teapv2_trusted_server_root(dev, apdev):
         raise Exception("Trusted-Server-Root blob not stored")
 
     ca_cert = dev[0].request("GET_NETWORK %d ca_cert" % net_id)
-    if not ca_cert.startswith("blob://"):
+    if not ca_cert.startswith("\"blob://"):
         raise Exception("Trusted-Server-Root not configured as trust anchor")
-    if ca_cert[7:] != trust_blob:
+    if ca_cert[8:] != trust_blob + '\"':
         raise Exception("Unexpected trust anchor reference: " + ca_cert)
 
 def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
