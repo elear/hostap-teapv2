@@ -165,10 +165,10 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
         eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1")
     hapd = hostapd.add_ap(apdev[0], server_params)
 
-    eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
-                anonymous_identity="TEAPV2",
-                ca_cert="auth_serv/ca.pem",
-                client_cert=client_cert, private_key=client_key)
+    net_id = eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
+                         anonymous_identity="TEAPV2",
+                         ca_cert="auth_serv/ca.pem",
+                         client_cert=client_cert, private_key=client_key)
     if "OK" not in dev[0].request("SET update_config 1"):
         raise Exception("Failed to set update_config")
     dev[0].save_config()
@@ -202,6 +202,11 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
         raise Exception("Failed to read PKCS#7 certificate blob")
     if "BEGIN CERTIFICATE" not in cert_data:
         raise Exception("Stored PKCS#7 certificate blob missing certificate")
+    if "client_cert=\"blob://%s\"" % cert_blob not in conf_data:
+        raise Exception("PKCS#7 client_cert not stored in config file")
+    client_cert_ref = dev[0].request("GET_NETWORK %d client_cert" % net_id)
+    if client_cert_ref != "\"blob://" + cert_blob + '\"':
+        raise Exception("Stored PKCS#7 certificate not set as client_cert")
 
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""
