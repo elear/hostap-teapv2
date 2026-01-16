@@ -130,6 +130,10 @@ def test_eap_teapv2_trusted_server_root(dev, apdev):
                          ca_cert="auth_serv/ca.pem",
                          phase2="auth=MSCHAPV2")
 
+    if "OK" not in dev[0].request("SET update_config 1"):
+        raise Exception("Failed to set update_config")
+    dev[0].save_config()
+
     blobs = dev[0].request("LIST_BLOBS")
     blob_list = []
     for b in blobs.splitlines():
