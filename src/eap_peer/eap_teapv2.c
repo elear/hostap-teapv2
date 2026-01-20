@@ -1481,9 +1481,6 @@ done:
 		ret->methodState = METHOD_MAY_CONT;
 		data->on_tx_completion = METHOD_DONE;
 		ret->decision = DECISION_UNCOND_SUCC;
-	} else {
-		wpa_printf(MSG_DEBUG, "TEAPV2: could not set ret->decision: fail = %d, phase2_success = %d, pkcs7_success = %d",
-			failed, data->phase2_success, data->pkcs7_success);
 	}
 
 	if (!resp) {
