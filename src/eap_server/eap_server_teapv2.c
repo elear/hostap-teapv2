@@ -1378,70 +1378,65 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 	}
 
 	if (tlv.pkcs10) {
-		if (!data->pkcs10_expected) {
-			wpa_printf(MSG_DEBUG,
-				   "EAP-TEAPV2: Ignoring unexpected PKCS#10 TLV");
-		} else {
-			size_t b64_len;
-			char *b64 = base64_encode(tlv.pkcs10, tlv.pkcs10_len,
-						  &b64_len);
+		size_t b64_len;
+		char *b64 = base64_encode(tlv.pkcs10, tlv.pkcs10_len,
+						&b64_len);
 
-			if (b64) {
-				size_t pem_len = b64_len + b64_len / 64 + 96;
-				char *pem = os_malloc(pem_len);
+		if (b64) {
+			size_t pem_len = b64_len + b64_len / 64 + 96;
+			char *pem = os_malloc(pem_len);
 
-				if (pem) {
-					char *pos = pem;
-					size_t left = pem_len;
-					size_t i;
+			if (pem) {
+				char *pos = pem;
+				size_t left = pem_len;
+				size_t i;
 
-					pos += os_strlcpy(pos,
-							  "-----BEGIN CERTIFICATE REQUEST-----\n",
-							  left);
+				pos += os_strlcpy(pos,
+							"-----BEGIN CERTIFICATE REQUEST-----\n",
+							left);
+				left = pem_len - (pos - pem);
+
+				for (i = 0; i < b64_len && left > 1;
+						i += 64) {
+					size_t line = b64_len - i;
+
+					if (line > 64)
+						line = 64;
+					pos += os_snprintf(pos, left,
+								"%.*s",
+								(int) line,
+								b64 + i);
 					left = pem_len - (pos - pem);
-
-					for (i = 0; i < b64_len && left > 1;
-					     i += 64) {
-						size_t line = b64_len - i;
-
-						if (line > 64)
-							line = 64;
-						pos += os_snprintf(pos, left,
-								   "%.*s",
-								   (int) line,
-								   b64 + i);
-						left = pem_len - (pos - pem);
-					}
-
-					if (left > 0) {
-						os_strlcpy(pos,
-							   "-----END CERTIFICATE REQUEST-----",
-							   left);
-						wpa_printf(MSG_DEBUG,
-							   "EAP-TEAPV2: Received PKCS#10 CSR (PEM)\n%s",
-							   pem);
-					}
-					os_free(pem);
 				}
-				os_free(b64);
+
+				if (left > 0) {
+					os_strlcpy(pos,
+							"-----END CERTIFICATE REQUEST-----",
+							left);
+					wpa_printf(MSG_DEBUG,
+							"EAP-TEAPV2: Received PKCS#10 CSR (PEM)\n%s",
+							pem);
+				}
+				os_free(pem);
 			}
-			wpabuf_free(data->pkcs7_cert);
-			data->pkcs7_cert = tls_connection_sign_pkcs7(
-				sm->cfg->ssl_ctx, tlv.pkcs10, tlv.pkcs10_len,
-				sm->cfg->server_cert, sm->cfg->private_key);
-			wpabuf_free(data->pkcs10_csr);
-			data->pkcs10_csr = wpabuf_alloc_copy(tlv.pkcs10,
-							     tlv.pkcs10_len);
-			data->pkcs10_expected = false;
-			if (data->pkcs7_cert) {
-				eap_teapv2_state(data, PKCS7_READY);
-				wpa_printf(MSG_DEBUG,
-					   "EAP-TEAPV2: Prepared PKCS#7 response (%u bytes)",
-					   (unsigned int) wpabuf_len(data->pkcs7_cert));
-			} else {
-				wpa_printf(MSG_INFO,
-					   "EAP-TEAPV2: Failed to prepare PKCS#7 response");
-			}
+			os_free(b64);
+		}
+		wpabuf_free(data->pkcs7_cert);
+		data->pkcs7_cert = tls_connection_sign_pkcs7(
+			sm->cfg->ssl_ctx, tlv.pkcs10, tlv.pkcs10_len,
+			sm->cfg->server_cert, sm->cfg->private_key);
+		wpabuf_free(data->pkcs10_csr);
+		data->pkcs10_csr = wpabuf_alloc_copy(tlv.pkcs10,
+								tlv.pkcs10_len);
+		data->pkcs10_expected = false;
+		if (data->pkcs7_cert) {
+			eap_teapv2_state(data, PKCS7_READY);
+			wpa_printf(MSG_DEBUG,
+					"EAP-TEAPV2: Prepared PKCS#7 response (%u bytes)",
+					(unsigned int) wpabuf_len(data->pkcs7_cert));
+		} else {
+			wpa_printf(MSG_INFO,
+					"EAP-TEAPV2: Failed to prepare PKCS#7 response");
 		}
 	}
 
