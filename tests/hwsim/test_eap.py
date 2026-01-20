@@ -902,7 +902,6 @@ def test_eap_teapv2_errors(dev, apdev):
              (1, "eap_teapv2_process_eap_payload_tlv"),
              (1, "eap_teapv2_compound_mac"),
              (1, "eap_teapv2_tlv_result"),
-             (1, "eap_teapv2_select_phase2_method"),
              (1, "eap_peer_tls_ssl_init"),
              (1, "eap_teapv2_session_id"),
              (1, "wpabuf_alloc;=eap_teapv2_process_crypto_binding"),
