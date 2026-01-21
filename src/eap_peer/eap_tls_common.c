@@ -185,7 +185,6 @@ static int eap_tls_params_from_conf(struct eap_sm *sm,
 	}
 	if (data->eap_type == EAP_TYPE_FAST ||
 	    data->eap_type == EAP_TYPE_TEAP ||
-	    data->eap_type == EAP_TYPE_TEAPV2 ||
 	    data->eap_type == EAP_TYPE_TTLS ||
 	    data->eap_type == EAP_TYPE_PEAP) {
 		/* The current EAP peer implementation is not yet ready for the
@@ -216,6 +215,10 @@ static int eap_tls_params_from_conf(struct eap_sm *sm,
 		eap_tls_params_from_conf1(params, config);
 		if (data->eap_type == EAP_TYPE_FAST)
 			params->flags |= TLS_CONN_EAP_FAST;
+	}
+	if (data->eap_type == EAP_TYPE_TEAPV2) {
+		params->flags |= TLS_CONN_DISABLE_TLSv1_2;
+		params->flags &= ~TLS_CONN_DISABLE_TLSv1_3;
 	}
 
 	/*

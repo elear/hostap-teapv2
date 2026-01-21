@@ -77,6 +77,9 @@ struct eap_ssl_data {
 
 struct wpabuf * eap_tls_msg_alloc(enum eap_type type, size_t payload_len,
 				  u8 code, u8 identifier);
+int eap_server_tls_ssl_init_flags(struct eap_sm *sm, struct eap_ssl_data *data,
+				  int verify_peer, int eap_type,
+				  unsigned int flags);
 int eap_server_tls_ssl_init(struct eap_sm *sm, struct eap_ssl_data *data,
 			    int verify_peer, int eap_type);
 void eap_server_tls_ssl_deinit(struct eap_sm *sm, struct eap_ssl_data *data);

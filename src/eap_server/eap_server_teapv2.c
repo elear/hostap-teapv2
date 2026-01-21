@@ -276,6 +276,7 @@ out:
 static void * eap_teapv2_init(struct eap_sm *sm)
 {
 	struct eap_teapv2_data *data;
+	unsigned int tls_flags;
 
 	data = os_zalloc(sizeof(*data));
 	if (!data)
@@ -283,9 +284,14 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 	data->teapv2_version = EAP_TEAPV2_VERSION;
 	data->state = START;
 
-	if (eap_server_tls_ssl_init(sm, &data->ssl,
-				    sm->cfg->eap_teapv2_auth == 2 ? 2 : 0,
-				    EAP_TYPE_TEAPV2)) {
+	tls_flags = sm->cfg->tls_flags;
+	tls_flags |= TLS_CONN_DISABLE_TLSv1_0 | TLS_CONN_DISABLE_TLSv1_1 |
+		TLS_CONN_DISABLE_TLSv1_2;
+	tls_flags &= ~TLS_CONN_DISABLE_TLSv1_3;
+
+	if (eap_server_tls_ssl_init_flags(
+		    sm, &data->ssl, sm->cfg->eap_teapv2_auth == 2 ? 2 : 0,
+		    EAP_TYPE_TEAPV2, tls_flags)) {
 		wpa_printf(MSG_INFO, "EAP-TEAPV2: Failed to initialize SSL.");
 		eap_teapv2_reset(sm, data);
 		return NULL;
