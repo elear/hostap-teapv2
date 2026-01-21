@@ -58,6 +58,7 @@ struct eap_teapv2_data {
 	bool cmk_emsk_available;
 	bool pkcs10_requested;
 	bool pkcs7_success;
+	bool cb_required;
 
 	struct wpabuf *pending_phase2_req;
 	struct wpabuf *pending_resp;
@@ -518,6 +519,7 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
 	data->pkcs7_success = false;
+	data->cb_required = true;
 }
 
 
@@ -870,6 +872,7 @@ static struct wpabuf * eap_teapv2_process_basic_auth_req(
 	/* Assume this succeeds so that Result TLV(Success) from the server can
 	 * be used to terminate TEAPV2. */
 	data->phase2_success = 1;
+	data->cb_required = false;
 
 	return resp;
 }
@@ -1291,7 +1294,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		goto send_resp;
 	}
 
-	if (tlv.iresult == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
+	if (data->cb_required &&
+	    tlv.iresult == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
 		/* Intermediate-Result TLV indicating success, but no
 		 * Crypto-Binding TLV */
 		wpa_printf(MSG_DEBUG,
@@ -1301,7 +1305,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		goto done;
 	}
 
-	if (!data->iresult_verified && !data->result_success_done &&
+	if (data->cb_required && !data->iresult_verified &&
+	    !data->result_success_done &&
 	    tlv.result == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
 		/* Result TLV indicating success, but no Crypto-Binding TLV */
 		wpa_printf(MSG_DEBUG,
@@ -1473,7 +1478,8 @@ done:
 	}
 
 	if (resp && ((tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
-	    (tlv.crypto_binding || data->iresult_verified) &&
+	    (tlv.crypto_binding || data->iresult_verified ||
+	     !data->cb_required) &&
 	    data->phase2_success) || data->pkcs7_success)) {
 		/* Successfully completed Phase 2 */
 		wpa_printf(MSG_DEBUG,

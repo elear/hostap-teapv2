@@ -1181,7 +1181,10 @@ static void eap_teapv2_process_basic_auth_resp(struct eap_sm *sm,
 	if (sm->cfg->eap_teapv2_id != EAP_TEAPV2_ID_REQUIRE_USER_AND_MACHINE ||
 	    data->cur_id_type == TEAPV2_IDENTITY_TYPE_MACHINE)
 		data->basic_auth_not_done = 0;
-	eap_teapv2_state(data, CRYPTO_BINDING);
+	if (data->basic_auth_not_done)
+		eap_teapv2_state(data, PHASE2_BASIC_AUTH);
+	else
+		eap_teapv2_state(data, SUCCESS_SEND_RESULT);
 	eap_teapv2_update_icmk(sm, data);
 }
 
@@ -1668,7 +1671,7 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 			return 1;
 		} else if (sm->cfg->eap_teapv2_auth == 1) {
 			eap_teapv2_state(data, PHASE2_BASIC_AUTH);
-			return 1;
+			return 0;
 		} else {
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Identity already known - skip Phase 2 Identity Request");
