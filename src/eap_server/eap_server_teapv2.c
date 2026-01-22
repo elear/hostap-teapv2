@@ -768,7 +768,8 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 						req = eap_teapv2_tlv_result(
 							TEAPV2_STATUS_SUCCESS,
 							0);
-						req=eap_teapv2_add_request_action(data,req);
+						req = eap_teapv2_add_request_action(
+							data, req);
 					}
 					piggyback = 1;
 					break;
@@ -833,6 +834,8 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 		break;
 	case SUCCESS_SEND_RESULT:
 		req = eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0);
+		req = eap_teapv2_add_request_action(data, req);
+		req = eap_teapv2_add_pkcs7(data, req);
 		data->final_result = 1;
 		break;
 	default:
