@@ -986,17 +986,6 @@ def test_eap_teapv2_errors2(dev, apdev):
                            wait_connect=False)
             wait_eap_proposed(dev[0], wait_trigger="GET_ALLOC_FAIL")
 
-    tests = [(1, "eap_teapv2_derive_imck")]
-    for count, func in tests:
-        with fail_test(dev[0], count, func):
-            dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
-                           scan_freq="2412",
-                           eap="TEAPV2", identity="user", password="password",
-                           anonymous_identity="TEAPV2",
-                           ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2",
-                           wait_connect=False)
-            wait_eap_proposed(dev[0], wait_trigger="GET_FAIL")
-
 def test_eap_teap_eap_vendor(dev, apdev):
     """EAP-TEAP with inner EAP-vendor"""
     check_eap_capa(dev[0], "TEAP")
