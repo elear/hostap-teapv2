@@ -768,6 +768,7 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 						req = eap_teapv2_tlv_result(
 							TEAPV2_STATUS_SUCCESS,
 							0);
+						req=eap_teapv2_request_action_pkcs10(data,req);
 					}
 					piggyback = 1;
 					break;
