@@ -1393,14 +1393,14 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		goto send_resp;
 	}
 
-	if (tlv.pkcs7 &&
-	    eap_teapv2_process_pkcs7(sm, data, tlv.pkcs7, tlv.pkcs7_len) < 0) {
+	if (tlv.pkcs7) {
+		if (eap_teapv2_process_pkcs7(sm, data, tlv.pkcs7, tlv.pkcs7_len) < 0) {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to store PKCS#7 certificate");
 		failed = 1;
 		goto done;
-	}
-	if (tlv.pkcs7) {
+		}
+
 		data->pkcs7_success = true;
 		if (eap_teapv2_derive_msk(data) < 0 ||
 		    eap_teapv2_session_id(data) < 0) {
@@ -1418,6 +1418,13 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 						      tlv.identity_type);
 		if (!tmp)
 			failed = 1;
+		else if (eap_teapv2_derive_msk(data) < 0 ||
+			 	 eap_teapv2_session_id(data) < 0) {
+				wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to derive keys after PKCS#7");
+				failed = 1;
+				goto done;
+				}
 		resp = wpabuf_concat(resp, tmp);
 	} else if (tlv.eap_payload_tlv) {
 		tmp = eap_teapv2_process_eap_payload_tlv(sm, data, ret,
