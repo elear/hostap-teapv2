@@ -519,7 +519,7 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
 	data->pkcs7_success = false;
-	data->cb_required = true;
+	data->cb_required = false;
 }
 
 
@@ -819,6 +819,7 @@ static struct wpabuf * eap_teapv2_process_eap_payload_tlv(
 		return NULL;
 	}
 
+	data->cb_required = true;
 	if (eap_teapv2_phase2_request(sm, data, ret, hdr, &resp)) {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Phase 2 Request processing failed");

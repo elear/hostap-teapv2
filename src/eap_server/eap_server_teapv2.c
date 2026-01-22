@@ -760,8 +760,15 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 					   "EAP-TEAPV2: Try to start Phase 2");
 				res = eap_teapv2_process_phase2_start(sm, data);
 				if (res == 1) {
-					req = eap_teapv2_build_crypto_binding(
-						sm, data);
+					if (data->state == CRYPTO_BINDING) {
+						req = eap_teapv2_build_crypto_binding(
+							sm, data);
+					} else if (data->state ==
+						   SUCCESS_SEND_RESULT) {
+						req = eap_teapv2_tlv_result(
+							TEAPV2_STATUS_SUCCESS,
+							0);
+					}
 					piggyback = 1;
 					break;
 				}
@@ -1667,7 +1674,7 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 						 data->simck_emsk,
 						 data->cmk_emsk))
 				return -1;
-			eap_teapv2_state(data, CRYPTO_BINDING);
+			eap_teapv2_state(data, SUCCESS_SEND_RESULT);
 			return 1;
 		} else if (sm->cfg->eap_teapv2_auth == 1) {
 			eap_teapv2_state(data, PHASE2_BASIC_AUTH);
