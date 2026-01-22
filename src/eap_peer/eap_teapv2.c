@@ -1421,7 +1421,7 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		else if (eap_teapv2_derive_msk(data) < 0 ||
 			 	 eap_teapv2_session_id(data) < 0) {
 				wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Failed to derive keys after PKCS#7");
+				   "EAP-TEAPV2: Failed to derive keys after basic auth");
 				failed = 1;
 				goto done;
 				}
