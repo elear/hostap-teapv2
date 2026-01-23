@@ -1419,14 +1419,9 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 						      tlv.identity_type);
 		if (!tmp)
 			failed = 1;
-		else if (eap_teapv2_derive_msk(data) < 0 ||
-			 	 eap_teapv2_session_id(data) < 0) {
-				wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Failed to derive keys after basic auth");
-				failed = 1;
-				goto done;
-				}
-		resp = wpabuf_concat(resp, tmp);
+		else 
+			resp = wpabuf_concat(resp, tmp);
+
 	} else if (tlv.eap_payload_tlv) {
 		tmp = eap_teapv2_process_eap_payload_tlv(sm, data, ret,
 						       tlv.eap_payload_tlv,
@@ -1495,6 +1490,19 @@ done:
 		ret->methodState = METHOD_MAY_CONT;
 		data->on_tx_completion = METHOD_DONE;
 		ret->decision = DECISION_UNCOND_SUCC;
+
+		if ( !data->pkcs7_success && !data->cb_required ) {
+			wpa_printf(MSG_DEBUG, "success: doing key generation");
+			if (eap_teapv2_derive_msk(data) < 0 ||
+			 	 eap_teapv2_session_id(data) < 0) {
+				wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to derive keys after basic auth");
+				tmp = eap_teapv2_tlv_error(error);
+				resp = wpabuf_concat(tmp, resp);
+				ret->methodState = METHOD_DONE;
+				ret->decision = DECISION_FAIL;
+			}
+		}
 	}
 
 	if (!resp) {
