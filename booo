@@ -1,0 +1,42 @@
+diff --git a/src/eap_server/eap_server_teapv2.c b/src/eap_server/eap_server_teapv2.c
+index 5f3575c13..779939907 100644
+--- a/src/eap_server/eap_server_teapv2.c
++++ b/src/eap_server/eap_server_teapv2.c
+@@ -760,8 +760,17 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
+ 					   "EAP-TEAPV2: Try to start Phase 2");
+ 				res = eap_teapv2_process_phase2_start(sm, data);
+ 				if (res == 1) {
+-					req = eap_teapv2_build_crypto_binding(
+-						sm, data);
++					if (data->state == CRYPTO_BINDING) {
++						req = eap_teapv2_build_crypto_binding(
++							sm, data);
++					} else if (data->state ==
++						   SUCCESS_SEND_RESULT) {
++						req = eap_teapv2_tlv_result(
++							TEAPV2_STATUS_SUCCESS,
++							0);
++						req = eap_teapv2_add_request_action(
++							data, req);
++					}
+ 					piggyback = 1;
+ 					break;
+ 				}
+@@ -825,6 +834,8 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
+ 		break;
+ 	case SUCCESS_SEND_RESULT:
+ 		req = eap_teapv2_tlv_result(TEAPV2_STATUS_SUCCESS, 0);
++		req = eap_teapv2_add_request_action(data, req);
++		req = eap_teapv2_add_pkcs7(data, req);
+ 		data->final_result = 1;
+ 		break;
+ 	default:
+@@ -1667,7 +1678,7 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
+ 						 data->simck_emsk,
+ 						 data->cmk_emsk))
+ 				return -1;
+-			eap_teapv2_state(data, CRYPTO_BINDING);
++			eap_teapv2_state(data, SUCCESS_SEND_RESULT);
+ 			return 1;
+ 		} else if (sm->cfg->eap_teapv2_auth == 1) {
+ 			eap_teapv2_state(data, PHASE2_BASIC_AUTH);
