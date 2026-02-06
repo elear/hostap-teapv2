@@ -2385,6 +2385,26 @@ int tls_connection_get_failed(void *tls_ctx, struct tls_connection *conn)
 	return conn->failed;
 }
 
+int tls_connection_peer_cert_validity(void *tls_ctx,
+				      struct tls_connection *conn,
+				      struct os_time *not_before,
+				      struct os_time *not_after)
+{
+	return -1;
+}
+
+struct wpabuf * tls_connection_sign_pkcs7(void *tls_ctx, const u8 *pkcs10,
+					  size_t len, const char *cert_file,
+					  const char *key_file)
+{
+	(void) tls_ctx;
+	(void) pkcs10;
+	(void) len;
+	(void) cert_file;
+	(void) key_file;
+	return NULL;
+}
+
 
 int tls_connection_get_read_alerts(void *tls_ctx, struct tls_connection *conn)
 {
@@ -2720,7 +2740,26 @@ tls_connection_get_success_data(struct tls_connection *conn)
 
 bool tls_connection_get_own_cert_used(struct tls_connection *conn)
 {
-	if (conn)
-		return wolfSSL_get_certificate(conn->ssl) != NULL;
-	return false;
+	if (!conn)
+		return false;
+	return wolfSSL_get_certificate(conn->ssl) != NULL;
+}
+
+
+struct wpabuf * tls_connection_get_own_cert(struct tls_connection *conn)
+{
+	WOLFSSL_X509 *cert;
+	struct wpabuf *res;
+
+	if (!conn)
+		return NULL;
+
+	cert = wolfSSL_get_certificate(conn->ssl);
+	if (!cert)
+		return NULL;
+
+	res = get_x509_cert(cert);
+	wolfSSL_X509_free(cert);
+
+	return res;
 }

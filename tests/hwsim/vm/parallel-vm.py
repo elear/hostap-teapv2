@@ -790,6 +790,7 @@ def main():
     missing['DPP version 2 not supported'] = 'CONFIG_DPP2'
     missing['EAP method PWD not supported in the build'] = 'CONFIG_EAP_PWD'
     missing['EAP method TEAP not supported in the build'] = 'CONFIG_EAP_TEAP'
+    missing['EAP method TEAPV2 not supported in the build'] = 'CONFIG_EAP_TEAPV2'
     missing['FILS not supported'] = 'CONFIG_FILS'
     missing['FILS-SK-PFS not supported'] = 'CONFIG_FILS_SK_PFS'
     missing['OWE not supported'] = 'CONFIG_OWE'

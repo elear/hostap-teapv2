@@ -119,6 +119,11 @@ int eap_server_register_methods(void)
 		ret = eap_server_teap_register();
 #endif /* EAP_SERVER_TEAP */
 
+#ifdef EAP_SERVER_TEAPV2
+	if (ret == 0)
+		ret = eap_server_teapv2_register();
+#endif /* EAP_SERVER_TEAPV2 */
+
 #ifdef EAP_SERVER_WSC
 	if (ret == 0)
 		ret = eap_server_wsc_register();

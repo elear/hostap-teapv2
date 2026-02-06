@@ -397,6 +397,8 @@ def test_ap_config_invalid_value(dev, apdev, params):
              ("owe_transition_ssid", ""),
              ("owe_transition_ssid", '""'),
              ("owe_transition_ssid", '"' + 33*"a" + '"'),
+             ("eap_teapv2_auth", "-1"),
+             ("eap_teapv2_auth", "100"),
              ("multi_ap", "-1"),
              ("multi_ap", "255"),
              ("unknown-item", "foo")]

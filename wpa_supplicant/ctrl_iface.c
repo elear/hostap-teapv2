@@ -278,6 +278,41 @@ static int wpas_ctrl_set_blob(struct wpa_supplicant *wpa_s, char *pos)
 
 	return 0;
 }
+
+static int wpas_ctrl_list_blobs(struct wpa_supplicant *wpa_s, char *reply,
+				size_t reply_size)
+{
+	struct wpa_config_blob *blob;
+	int ret = 0;
+	size_t len = 0;
+
+	for (blob = wpa_s->conf->blobs; blob; blob = blob->next) {
+		int n = os_snprintf(reply + len, reply_size - len,
+				    "blob %s\n", blob->name);
+		if (os_snprintf_error(reply_size - len, n))
+			return -1;
+		len += n;
+		ret = len;
+	}
+
+	return ret;
+}
+
+static int wpas_ctrl_get_blob(struct wpa_supplicant *wpa_s, const char *name,
+			      char *reply, size_t reply_size)
+{
+	const struct wpa_config_blob *blob;
+
+	blob = wpa_config_get_blob(wpa_s->conf, name);
+	if (!blob)
+		return -1;
+
+	if (blob->len > reply_size)
+		return -1;
+
+	os_memcpy(reply, blob->data, blob->len);
+	return blob->len;
+}
 #endif /* CONFIG_NO_CONFIG_BLOBS */
 
 
@@ -13723,6 +13758,13 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 		reply_len = wpa_supplicant_ctrl_iface_get_cred(wpa_s, buf + 9,
 							       reply,
 							       reply_size);
+#ifndef CONFIG_NO_CONFIG_BLOBS
+	} else if (os_strcmp(buf, "LIST_BLOBS") == 0) {
+		reply_len = wpas_ctrl_list_blobs(wpa_s, reply, reply_size);
+	} else if (os_strncmp(buf, "GET_BLOB ", 9) == 0) {
+		reply_len = wpas_ctrl_get_blob(wpa_s, buf + 9, reply,
+					       reply_size);
+#endif /* CONFIG_NO_CONFIG_BLOBS */
 #ifndef CONFIG_NO_CONFIG_WRITE
 	} else if (os_strcmp(buf, "SAVE_CONFIG") == 0) {
 		if (wpa_supplicant_ctrl_iface_save_config(wpa_s))

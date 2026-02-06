@@ -100,6 +100,7 @@ int eap_peer_aka_register(void);
 int eap_peer_aka_prime_register(void);
 int eap_peer_fast_register(void);
 int eap_peer_teap_register(void);
+int eap_peer_teapv2_register(void);
 int eap_peer_pax_register(void);
 int eap_peer_sake_register(void);
 int eap_peer_gpsk_register(void);

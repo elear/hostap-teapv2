@@ -334,6 +334,16 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 	cfg->eap_teap_separate_result = hapd->conf->eap_teap_separate_result;
 	cfg->eap_teap_id = hapd->conf->eap_teap_id;
 	cfg->eap_teap_method_sequence = hapd->conf->eap_teap_method_sequence;
+	cfg->eap_teapv2_auth = hapd->conf->eap_teapv2_auth;
+	cfg->eap_teapv2_separate_result = hapd->conf->eap_teapv2_separate_result;
+	cfg->eap_teapv2_id = hapd->conf->eap_teapv2_id;
+	cfg->eap_teapv2_method_sequence =
+		hapd->conf->eap_teapv2_method_sequence;
+	cfg->eap_teapv2_request_action_pkcs10 =
+		hapd->conf->eap_teapv2_request_action_pkcs10;
+	if (hapd->conf->eap_teapv2_trusted_server_root)
+		cfg->eap_teapv2_trusted_server_root =
+			os_strdup(hapd->conf->eap_teapv2_trusted_server_root);
 	cfg->eap_sim_aka_result_ind = hapd->conf->eap_sim_aka_result_ind;
 	cfg->eap_sim_id = hapd->conf->eap_sim_id;
 	cfg->imsi_privacy_key = hapd->imsi_privacy_key;
@@ -351,6 +361,10 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 		cfg->server_id = (u8 *) os_strdup("hostapd");
 		cfg->server_id_len = 7;
 	}
+	if (hapd->conf->server_cert)
+		cfg->server_cert = os_strdup(hapd->conf->server_cert);
+	if (hapd->conf->private_key)
+		cfg->private_key = os_strdup(hapd->conf->private_key);
 	cfg->erp = hapd->conf->eap_server_erp;
 #ifdef CONFIG_TESTING_OPTIONS
 	cfg->skip_prot_success = hapd->conf->eap_skip_prot_success;

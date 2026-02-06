@@ -28,6 +28,7 @@
 #include <openssl/err.h>
 #include <openssl/opensslv.h>
 #include <openssl/pkcs12.h>
+#include <openssl/pkcs7.h>
 #include <openssl/x509v3.h>
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 #include <openssl/core_names.h>
@@ -60,7 +61,9 @@
 
 #if defined(EAP_FAST) || defined(EAP_FAST_DYNAMIC) || \
 	defined(EAP_SERVER_FAST) || defined(EAP_TEAP) || \
-	defined(EAP_SERVER_TEAP)
+	defined(EAP_TEAP_DYNAMIC) || defined(EAP_SERVER_TEAP) || \
+	defined(EAP_TEAPV2) || defined(EAP_TEAPV2_DYNAMIC) || \
+	defined(EAP_SERVER_TEAPV2)
 #define EAP_FAST_OR_TEAP
 #endif
 
@@ -5226,6 +5229,335 @@ int tls_connection_get_failed(void *ssl_ctx, struct tls_connection *conn)
 	return conn->failed;
 }
 
+static int openssl_asn1_time_to_os_time(const ASN1_TIME *asn1,
+					struct os_time *t)
+{
+	struct tm tm;
+	os_time_t sec;
+
+	if (!asn1 || !t)
+		return -1;
+
+	if (ASN1_TIME_to_tm(asn1, &tm) != 1)
+		return -1;
+
+	if (os_mktime(tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		      tm.tm_hour, tm.tm_min, tm.tm_sec, &sec) < 0)
+		return -1;
+
+	t->sec = sec;
+	t->usec = 0;
+	return 0;
+}
+
+
+int tls_connection_peer_cert_validity(void *ssl_ctx,
+				      struct tls_connection *conn,
+				      struct os_time *not_before,
+				      struct os_time *not_after)
+{
+	const ASN1_TIME *nb, *na;
+
+	if (!conn || !conn->peer_cert)
+		return -1;
+
+	nb = X509_get0_notBefore(conn->peer_cert);
+	na = X509_get0_notAfter(conn->peer_cert);
+	if (openssl_asn1_time_to_os_time(nb, not_before) < 0 ||
+	    openssl_asn1_time_to_os_time(na, not_after) < 0)
+		return -1;
+
+	return 0;
+}
+
+struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
+					  size_t len, const char *cert_file,
+					  const char *key_file)
+{
+	struct wpabuf *out = NULL;
+	BIO *cbio = NULL, *kbio = NULL;
+	X509 *cert = NULL, *signed_cert = NULL;
+	PKCS7 *p7 = NULL;
+	X509_REQ *req = NULL;
+	EVP_PKEY *pkey = NULL;
+	EVP_PKEY *req_pkey = NULL;
+	X509_EXTENSION *ext = NULL;
+	AUTHORITY_KEYID *akid = NULL;
+	ASN1_OCTET_STRING *akid_data = NULL;
+	BASIC_CONSTRAINTS *bc = NULL;
+	ASN1_OCTET_STRING *ski = NULL;
+	ASN1_OCTET_STRING *ski_data = NULL;
+	unsigned char *akid_der = NULL;
+	ASN1_OCTET_STRING *bc_data = NULL;
+	unsigned char *bc_der = NULL;
+	unsigned char *pos;
+	int der_len;
+	int akid_der_len;
+	int bc_der_len;
+	const unsigned char *p = pkcs10;
+
+	(void) ssl_ctx;
+
+	if (!cert_file || !key_file) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: PKCS#7 signing failed - missing cert or key file");
+		goto fail;
+	}
+
+	cbio = BIO_new_file(cert_file, "r");
+	if (!cbio) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to read signing cert '%s'", cert_file);
+		goto fail;
+	}
+	cert = PEM_read_bio_X509(cbio, NULL, NULL, NULL);
+	if (!cert) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to parse signing cert");
+		goto fail;
+	}
+
+	if (!pkcs10 || len == 0) {
+		wpa_printf(MSG_INFO, "OpenSSL: No PKCS#10 CSR provided");
+		goto fail;
+	}
+
+	req = d2i_X509_REQ(NULL, &p, len);
+	if (!req) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to parse PKCS#10 CSR");
+		goto fail;
+	}
+
+	req_pkey = X509_REQ_get_pubkey(req);
+	if (!req_pkey) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to get public key from CSR");
+		goto fail;
+	}
+
+	kbio = BIO_new_file(key_file, "r");
+	if (!kbio) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to read signing key '%s'", key_file);
+		goto fail;
+	}
+	pkey = PEM_read_bio_PrivateKey(kbio, NULL, NULL, NULL);
+	if (!pkey) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to parse signing key");
+		goto fail;
+	}
+
+	signed_cert = X509_new();
+	if (!signed_cert) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to allocate certificate");
+		goto fail;
+	}
+
+	if (X509_set_version(signed_cert, 2) != 1 ||
+	    ASN1_INTEGER_set(X509_get_serialNumber(signed_cert), 1) != 1 ||
+	    X509_set_issuer_name(signed_cert, X509_get_subject_name(cert)) != 1 ||
+	    X509_set_subject_name(signed_cert, X509_REQ_get_subject_name(req)) != 1 ||
+	    X509_set_pubkey(signed_cert, req_pkey) != 1 ||
+	    !X509_gmtime_adj(X509_get_notBefore(signed_cert), 0) ||
+	    !X509_gmtime_adj(X509_get_notAfter(signed_cert), 365 * 24 * 60 * 60)) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to populate certificate from CSR");
+		goto fail;
+	}
+
+	bc = BASIC_CONSTRAINTS_new();
+	if (!bc) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to allocate BasicConstraints");
+		goto fail;
+	}
+	bc->ca = 0;
+	bc->pathlen = NULL;
+
+	bc_der_len = i2d_BASIC_CONSTRAINTS(bc, &bc_der);
+	if (bc_der_len <= 0) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to encode BasicConstraints");
+		goto fail;
+	}
+
+	bc_data = ASN1_OCTET_STRING_new();
+	if (!bc_data ||
+	    ASN1_OCTET_STRING_set(bc_data, bc_der, bc_der_len) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to create BasicConstraints data");
+		goto fail;
+	}
+	OPENSSL_free(bc_der);
+	bc_der = NULL;
+
+	ext = X509_EXTENSION_create_by_NID(NULL, NID_basic_constraints, 0,
+					   bc_data);
+	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to add BasicConstraints extension");
+		X509_EXTENSION_free(ext);
+		ext = NULL;
+		goto fail;
+	}
+	X509_EXTENSION_free(ext);
+	ext = NULL;
+	ASN1_OCTET_STRING_free(bc_data);
+	bc_data = NULL;
+	BASIC_CONSTRAINTS_free(bc);
+	bc = NULL;
+
+	akid = AUTHORITY_KEYID_new();
+	if (!akid) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to allocate AuthorityKeyIdentifier");
+		goto fail;
+	}
+
+	ski = X509_get_ext_d2i(cert, NID_subject_key_identifier, NULL, NULL);
+	if (ski) {
+		akid->keyid = ASN1_OCTET_STRING_dup(ski);
+		if (!akid->keyid) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to copy AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+	} else {
+		unsigned char keyid[EVP_MAX_MD_SIZE];
+		unsigned int keyid_len = 0;
+
+		if (!X509_pubkey_digest(cert, EVP_sha1(), keyid, &keyid_len)) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to compute AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+		wpa_hexdump(MSG_DEBUG, "OpenSSL: AuthorityKeyIdentifier keyid",
+			    keyid, keyid_len);
+		akid->keyid = ASN1_OCTET_STRING_new();
+		if (!akid->keyid ||
+		    ASN1_OCTET_STRING_set(akid->keyid, keyid, keyid_len) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set AuthorityKeyIdentifier keyid");
+			goto fail;
+		}
+	}
+
+	akid_der_len = i2d_AUTHORITY_KEYID(akid, &akid_der);
+	if (akid_der_len <= 0) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to encode AuthorityKeyIdentifier");
+		goto fail;
+	}
+
+	akid_data = ASN1_OCTET_STRING_new();
+	if (!akid_data ||
+	    ASN1_OCTET_STRING_set(akid_data, akid_der, akid_der_len) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to create AuthorityKeyIdentifier data");
+		goto fail;
+	}
+	OPENSSL_free(akid_der);
+	akid_der = NULL;
+
+	ext = X509_EXTENSION_create_by_NID(NULL, NID_authority_key_identifier, 0,
+					   akid_data);
+	if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to add AuthorityKeyIdentifier extension");
+		X509_EXTENSION_free(ext);
+		ext = NULL;
+		goto fail;
+	}
+	X509_EXTENSION_free(ext);
+	ext = NULL;
+	ASN1_OCTET_STRING_free(akid_data);
+	akid_data = NULL;
+	AUTHORITY_KEYID_free(akid);
+	akid = NULL;
+	ASN1_OCTET_STRING_free(ski);
+	ski = NULL;
+
+	{
+		unsigned char skid[EVP_MAX_MD_SIZE];
+		unsigned int skid_len = 0;
+
+		if (!X509_pubkey_digest(signed_cert, EVP_sha1(), skid, &skid_len)) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to compute SubjectKeyIdentifier");
+			goto fail;
+		}
+
+		ski_data = ASN1_OCTET_STRING_new();
+		if (!ski_data ||
+		    ASN1_OCTET_STRING_set(ski_data, skid, skid_len) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to create SubjectKeyIdentifier data");
+			goto fail;
+		}
+
+		ext = X509V3_EXT_i2d(NID_subject_key_identifier,0,ski_data);
+
+		if (!ext || X509_add_ext(signed_cert, ext, -1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to add SubjectKeyIdentifier extension");
+			X509_EXTENSION_free(ext);
+			ext = NULL;
+			goto fail;
+		}
+		X509_EXTENSION_free(ext);
+		ext = NULL;
+		ASN1_OCTET_STRING_free(ski_data);
+		ski_data = NULL;
+	}
+
+	if (X509_sign(signed_cert, pkey, EVP_sha256()) == 0) {
+		wpa_printf(MSG_INFO, "OpenSSL: X509_sign failed");
+		goto fail;
+	}
+
+	p7 = PKCS7_new();
+	if (!p7 ||
+	    !PKCS7_set_type(p7, NID_pkcs7_signed) ||
+	    !PKCS7_content_new(p7, NID_pkcs7_data) ||
+	    !PKCS7_add_certificate(p7, signed_cert) ||
+	    (cert && !PKCS7_add_certificate(p7, cert))) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to build PKCS#7");
+		goto fail;
+	}
+
+	der_len = i2d_PKCS7(p7, NULL);
+	if (der_len <= 0) {
+		wpa_printf(MSG_INFO, "OpenSSL: Failed to DER-encode PKCS#7");
+		goto fail;
+	}
+	out = wpabuf_alloc(der_len);
+	if (!out)
+		goto fail;
+	pos = wpabuf_put(out, der_len);
+	if (i2d_PKCS7(p7, &pos) != der_len) {
+		wpa_printf(MSG_INFO,
+			   "OpenSSL: Failed to serialize PKCS#7 into DER (wrote different length)");
+		wpabuf_free(out);
+		out = NULL;
+	}
+
+fail:
+	PKCS7_free(p7);
+	ASN1_OCTET_STRING_free(akid_data);
+	AUTHORITY_KEYID_free(akid);
+	ASN1_OCTET_STRING_free(ski);
+	ASN1_OCTET_STRING_free(ski_data);
+	OPENSSL_free(akid_der);
+	ASN1_OCTET_STRING_free(bc_data);
+	BASIC_CONSTRAINTS_free(bc);
+	OPENSSL_free(bc_der);
+	X509_free(signed_cert);
+	X509_free(cert);
+	EVP_PKEY_free(pkey);
+	EVP_PKEY_free(req_pkey);
+	X509_REQ_free(req);
+	BIO_free(cbio);
+	BIO_free(kbio);
+	return out;
+}
+
 
 int tls_connection_get_read_alerts(void *ssl_ctx, struct tls_connection *conn)
 {
@@ -6281,4 +6613,34 @@ bool tls_connection_get_own_cert_used(struct tls_connection *conn)
 	if (conn)
 		return SSL_get_certificate(conn->ssl) != NULL;
 	return false;
+}
+
+
+struct wpabuf * tls_connection_get_own_cert(struct tls_connection *conn)
+{
+#if defined(EAP_FAST_OR_TEAP) || defined(CONFIG_SAE_PK)
+	X509 *cert;
+	int len;
+	unsigned char *buf = NULL;
+	struct wpabuf *res = NULL;
+
+	if (!conn)
+		return NULL;
+
+	cert = SSL_get_certificate(conn->ssl);
+	if (!cert)
+		return NULL;
+
+	len = i2d_X509(cert, &buf);
+	if (len <= 0 || !buf)
+		return NULL;
+
+	res = wpabuf_alloc_copy(buf, len);
+	OPENSSL_free(buf);
+
+	return res;
+#else
+	(void) conn;
+	return NULL;
+#endif /* EAP_FAST_OR_TEAP || CONFIG_SAE_PK */
 }

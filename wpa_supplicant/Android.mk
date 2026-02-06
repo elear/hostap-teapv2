@@ -740,6 +740,25 @@ NEED_TLS_PRF_SHA256=y
 NEED_TLS_PRF_SHA384=y
 endif
 
+ifdef CONFIG_EAP_TEAPV2
+# EAP-TEAPV2
+ifeq ($(CONFIG_EAP_TEAPV2), dyn)
+L_CFLAGS += -DEAP_TEAPV2_DYNAMIC
+EAPDYN += src/eap_peer/eap_teapv2.so
+EAPDYN += src/eap_common/eap_teapv2_common.c
+else
+L_CFLAGS += -DEAP_TEAPV2
+OBJS += src/eap_peer/eap_teapv2.c
+OBJS += src/eap_common/eap_teapv2_common.c
+endif
+TLS_FUNCS=y
+CONFIG_IEEE8021X_EAPOL=y
+NEED_T_PRF=y
+NEED_SHA384=y
+NEED_TLS_PRF_SHA256=y
+NEED_TLS_PRF_SHA384=y
+endif
+
 ifdef CONFIG_EAP_PAX
 # EAP-PAX
 ifeq ($(CONFIG_EAP_PAX), dyn)

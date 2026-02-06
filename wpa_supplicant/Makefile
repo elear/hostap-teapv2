@@ -789,6 +789,25 @@ NEED_TLS_PRF_SHA256=y
 NEED_TLS_PRF_SHA384=y
 endif
 
+ifdef CONFIG_EAP_TEAPV2
+# EAP-TEAPV2
+SRC_EAP_TEAPV2 = ../src/eap_peer/eap_teapv2.c
+SRC_EAP_TEAPV2 += ../src/eap_common/eap_teapv2_common.c
+ifeq ($(CONFIG_EAP_TEAPV2), dyn)
+CFLAGS += -DEAP_TEAPV2_DYNAMIC
+EAPDYN += eap_teapv2.so
+else
+CFLAGS += -DEAP_TEAPV2
+OBJS += $(patsubst %.c, %.o, $(SRC_EAP_TEAPV2))
+endif
+TLS_FUNCS=y
+CONFIG_IEEE8021X_EAPOL=y
+NEED_T_PRF=y
+NEED_SHA384=y
+NEED_TLS_PRF_SHA256=y
+NEED_TLS_PRF_SHA384=y
+endif
+
 ifdef CONFIG_EAP_PAX
 # EAP-PAX
 SRC_EAP_PAX = ../src/eap_peer/eap_pax.c ../src/eap_common/eap_pax_common.c
@@ -2135,6 +2154,11 @@ eap_fast.so: $(SRC_EAP_FAST)
 	@$(E) "  CC/LD " $@
 
 eap_teap.so: $(SRC_EAP_TEAP)
+	$(Q)$(CC) $(LDFLAGS) -o $@ $(CFLAGS) -shared -rdynamic -fPIC $^ \
+		-D$(@F:eap_%.so=eap_peer_%)_register=eap_peer_method_dynamic_init
+	@$(E) "  CC/LD " $@
+
+eap_teapv2.so: $(SRC_EAP_TEAPV2)
 	$(Q)$(CC) $(LDFLAGS) -o $@ $(CFLAGS) -shared -rdynamic -fPIC $^ \
 		-D$(@F:eap_%.so=eap_peer_%)_register=eap_peer_method_dynamic_init
 	@$(E) "  CC/LD " $@
