@@ -1415,10 +1415,10 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 		return;
 	}
 
-	if (tlv.pkcs10) {
-		size_t b64_len;
-		char *b64 = base64_encode(tlv.pkcs10, tlv.pkcs10_len,
-						&b64_len);
+		if (tlv.pkcs10) {
+			size_t b64_len;
+			char *b64 = base64_encode(tlv.pkcs10, tlv.pkcs10_len,
+							&b64_len);
 
 		if (b64) {
 			size_t pem_len = b64_len + b64_len / 64 + 96;
@@ -1475,14 +1475,14 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 		} else {
 			wpa_printf(MSG_INFO,
 					"EAP-TEAPV2: Failed to prepare PKCS#7 response");
+			}
 		}
-	}
 
-	if (check_crypto_binding) {
-		if (!tlv.crypto_binding) {
-			wpa_printf(MSG_DEBUG,
-				   "EAP-TEAPV2: No Crypto-Binding TLV received");
-			eap_teapv2_state(data, FAILURE);
+		if (check_crypto_binding) {
+			if (!tlv.crypto_binding) {
+				wpa_printf(MSG_DEBUG,
+					   "EAP-TEAPV2: No Crypto-Binding TLV received");
+				eap_teapv2_state(data, FAILURE);
 			return;
 		}
 
@@ -1514,6 +1514,13 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 						     tlv.crypto_binding_len)) {
 			eap_teapv2_state(data, FAILURE);
 			return;
+		}
+
+		if (data->pkcs10_expected && !tlv.pkcs10 &&
+		    tlv.result == TEAPV2_STATUS_SUCCESS) {
+			wpa_printf(MSG_DEBUG,
+				   "EAP-TEAPV2: PKCS#10 CSR not received when requested; allowing authentication to complete");
+			data->pkcs10_expected = false;
 		}
 
 		wpa_printf(MSG_DEBUG,
