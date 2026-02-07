@@ -566,7 +566,6 @@ static struct wpabuf * eap_teapv2_build_phase2_req(struct eap_sm *sm,
 
 	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Initiate inner EAP method");
 	data->inner_eap_not_done = 1;
-	data->cb_required = true;
 	if (!data->phase2_priv) {
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Phase 2 method not initialized");
@@ -1013,6 +1012,7 @@ static void eap_teapv2_process_phase2_response(struct eap_sm *sm,
 	}
 
 	data->inner_method_done = true;
+	data->cb_required = true;
 
 	switch (data->state) {
 	case PHASE2_ID:
