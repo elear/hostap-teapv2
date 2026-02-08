@@ -208,6 +208,39 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     if client_cert_ref != "\"blob://" + cert_blob + '\"':
         raise Exception("Stored PKCS#7 certificate not set as client_cert")
 
+def test_eap_teapv2_pkcs10_request_action_ignore(dev, apdev, params):
+    """EAP-TEAPV2 ignore PKCS#10 Request-Action and still complete"""
+    check_eap_capa(dev[0], "TEAPV2")
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    client_cert, client_key = teapv2_generate_near_expiry_cert(params['logdir'])
+    server_params = int_teapv2_server_params(
+        eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1")
+    hapd = hostapd.add_ap(apdev[0], server_params)
+
+    eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
+                anonymous_identity="TEAPV2",
+                ca_cert="auth_serv/ca.pem",
+                client_cert=client_cert, private_key=client_key,
+                teapv2_ignore_request_action_pkcs10="1")
+
+    blobs = dev[0].request("LIST_BLOBS")
+    blob_list = []
+    for b in blobs.splitlines():
+        b = b.strip()
+        if not b:
+            continue
+        if b.startswith("blob "):
+            b = b[5:]
+        blob_list.append(b)
+    key_blob = next((b for b in blob_list if b.startswith("teapv2-user-key")),
+                    None)
+    cert_blob = next((b for b in blob_list if b.startswith("teapv2-user-cert")),
+                     None)
+    if key_blob or cert_blob:
+        raise Exception("PKCS#10/PKCS#7 blobs unexpectedly stored")
+
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""
     check_eap_capa(dev[0], "TEAP")
