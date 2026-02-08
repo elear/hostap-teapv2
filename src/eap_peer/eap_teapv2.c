@@ -66,7 +66,7 @@ struct eap_teapv2_data {
 	struct wpabuf *server_outer_tlvs;
 	struct wpabuf *peer_outer_tlvs;
 
-	enum teapv2_compat {
+	enum teapv2_compat { // XXX needs to go.
 		TEAPV2_DEFAULT,
 		TEAPV2_FREERADIUS,
 	} teapv2_compat;
@@ -461,7 +461,7 @@ static void eap_teapv2_parse_phase1(struct eap_teapv2_data *data,
 		data->test_outer_tlvs = 1;
 #endif /* CONFIG_TESTING_OPTIONS */
 
-	if (os_strstr(phase1, "teapv2_compat=freeradius"))
+	if (os_strstr(phase1, "teapv2_compat=freeradius")) // XXX Needs to go.
 		data->teapv2_compat = TEAPV2_FREERADIUS;
 }
 
@@ -1016,7 +1016,7 @@ static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data,
 	}
 
 out:
-	if (data->teapv2_compat == TEAPV2_FREERADIUS) {
+	if (data->teapv2_compat == TEAPV2_FREERADIUS) { // XXX should not be in TEAPv2.  One behavior.
 		u8 tmp_simck[EAP_TEAPV2_SIMCK_LEN];
 		u8 tmp_cmk[EAP_TEAPV2_CMK_LEN];
 
