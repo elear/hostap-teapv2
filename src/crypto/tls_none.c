@@ -197,6 +197,16 @@ int tls_connection_peer_cert_validity(void *tls_ctx,
 	return -1;
 }
 
+int tls_connection_peer_cert_issued_by(void *tls_ctx,
+				       struct tls_connection *conn,
+				       const char *issuer_cert)
+{
+	(void) tls_ctx;
+	(void) conn;
+	(void) issuer_cert;
+	return -1;
+}
+
 struct wpabuf * tls_connection_sign_pkcs7(void *tls_ctx, const u8 *pkcs10,
 					  size_t len, const char *cert_file,
 					  const char *key_file)

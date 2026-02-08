@@ -2450,6 +2450,16 @@ int tls_get_version(void *ssl_ctx, struct tls_connection *conn,
 	return 0;
 }
 
+int tls_connection_peer_cert_issued_by(void *tls_ctx,
+				       struct tls_connection *conn,
+				       const char *issuer_cert)
+{
+	(void) tls_ctx;
+	(void) conn;
+	(void) issuer_cert;
+	return -1;
+}
+
 
 int tls_connection_get_random(void *ssl_ctx, struct tls_connection *conn,
 			      struct tls_random *keys)

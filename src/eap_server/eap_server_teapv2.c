@@ -151,6 +151,32 @@ static bool eap_teapv2_cert_near_expiry(struct eap_sm *sm,
 	return remaining * 3 < lifetime * 2;
 }
 
+static bool eap_teapv2_cert_not_signed_by_pkcs7(struct eap_sm *sm,
+						struct eap_teapv2_data *data)
+{
+	int res;
+
+	if (!sm->cfg->eap_teapv2_request_action_pkcs10_untrusted)
+		return false;
+	if (!sm->cfg->teapv2_pkcs7_cert)
+		return false;
+
+	res = tls_connection_peer_cert_issued_by(sm->cfg->ssl_ctx,
+						 data->ssl.conn,
+						 sm->cfg->teapv2_pkcs7_cert);
+	if (res < 0) {
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: Could not determine peer certificate issuer");
+		return false;
+	}
+	if (res == 0) {
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: Peer certificate not signed by TEAPV2 PKCS#7 signing cert - request PKCS#10 CSR");
+		return true;
+	}
+	return false;
+}
+
 
 static const char * eap_teapv2_state_txt(int state)
 {
@@ -429,7 +455,8 @@ static int eap_teapv2_phase1_done(struct eap_sm *sm, struct eap_teapv2_data *dat
 		return -1;
 	}
 
-	data->request_pkcs10 = eap_teapv2_cert_near_expiry(sm, data);
+	data->request_pkcs10 = eap_teapv2_cert_near_expiry(sm, data) ||
+		eap_teapv2_cert_not_signed_by_pkcs7(sm, data);
 	if (data->request_pkcs10) {
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Peer certificate is past the 2/3 lifetime threshold - request PKCS#10 CSR");

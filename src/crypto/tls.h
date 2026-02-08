@@ -606,6 +606,9 @@ int tls_connection_peer_cert_validity(void *ssl_ctx,
 				      struct tls_connection *conn,
 				      struct os_time *not_before,
 				      struct os_time *not_after);
+int tls_connection_peer_cert_issued_by(void *tls_ctx,
+				       struct tls_connection *conn,
+				       const char *issuer_cert);
 
 struct wpabuf * tls_connection_sign_pkcs7(void *tls_ctx, const u8 *pkcs10,
 					  size_t len, const char *cert_file,

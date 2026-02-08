@@ -220,6 +220,7 @@ struct eap_config {
 	} eap_teapv2_id;
 	int eap_teapv2_method_sequence;
 	int eap_teapv2_request_action_pkcs10;
+	int eap_teapv2_request_action_pkcs10_untrusted;
 	char *eap_teapv2_trusted_server_root;
 
 	/**

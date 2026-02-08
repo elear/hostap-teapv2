@@ -5270,6 +5270,36 @@ int tls_connection_peer_cert_validity(void *ssl_ctx,
 	return 0;
 }
 
+
+int tls_connection_peer_cert_issued_by(void *tls_ctx,
+				       struct tls_connection *conn,
+				       const char *issuer_cert)
+{
+	BIO *cbio = NULL;
+	X509 *issuer = NULL;
+	int res = -1;
+
+	(void) tls_ctx;
+
+	if (!conn || !conn->peer_cert || !issuer_cert)
+		return -1;
+
+	cbio = BIO_new_file(issuer_cert, "r");
+	if (!cbio)
+		return -1;
+
+	issuer = PEM_read_bio_X509(cbio, NULL, NULL, NULL);
+	if (!issuer)
+		goto out;
+
+	res = (X509_check_issued(issuer, conn->peer_cert) == X509_V_OK) ? 1 : 0;
+
+out:
+	X509_free(issuer);
+	BIO_free(cbio);
+	return res;
+}
+
 struct wpabuf * tls_connection_sign_pkcs7(void *ssl_ctx, const u8 *pkcs10,
 					  size_t len, const char *cert_file,
 					  const char *key_file)

@@ -469,6 +469,7 @@ struct hostapd_bss_config {
 	int eap_teapv2_id;
 	int eap_teapv2_method_sequence;
 	int eap_teapv2_request_action_pkcs10;
+	int eap_teapv2_request_action_pkcs10_untrusted;
 	char *eap_teapv2_trusted_server_root;
 	int eap_sim_aka_result_ind;
 	int eap_sim_id;
