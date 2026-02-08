@@ -63,14 +63,50 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
             eap_teapv2_trusted_server_root
     return params
 
-def teapv2_generate_near_expiry_cert(logdir):
+def teapv2_generate_signing_ca(logdir):
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
 
-    with open("auth_serv/ca.pem", "rb") as f:
+    key = OpenSSL.crypto.PKey()
+    key.generate_key(OpenSSL.crypto.TYPE_RSA, 2048)
+
+    cert = OpenSSL.crypto.X509()
+    cert.set_serial_number(random.randint(1, 1000000))
+    cert.gmtime_adj_notBefore(-365 * 24 * 3600)
+    cert.gmtime_adj_notAfter(3650 * 24 * 3600)
+    cert.set_pubkey(key)
+    subject = cert.get_subject()
+    subject.CN = "teapv2-signing-ca"
+    cert.set_issuer(subject)
+    cert.set_version(2)
+    cert.add_extensions([
+        OpenSSL.crypto.X509Extension(b"basicConstraints", True,
+                                     b"CA:TRUE"),
+        OpenSSL.crypto.X509Extension(b"keyUsage", True,
+                                     b"keyCertSign, cRLSign"),
+        OpenSSL.crypto.X509Extension(b"subjectKeyIdentifier", False,
+                                     b"hash", subject=cert),
+    ])
+    cert.sign(key, "sha256")
+
+    cert_file = os.path.join(logdir, "teapv2-signing-ca.pem")
+    key_file = os.path.join(logdir, "teapv2-signing-ca.key")
+    with open(cert_file, "wb") as f:
+        f.write(OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
+                                                cert))
+    with open(key_file, "wb") as f:
+        f.write(OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM,
+                                               key))
+    return cert_file, key_file
+
+def teapv2_generate_near_expiry_cert(logdir, ca_cert_file, ca_key_file):
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    with open(ca_cert_file, "rb") as f:
         cacert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM,
                                                  f.read())
-    with open("auth_serv/ca-key.pem", "rb") as f:
+    with open(ca_key_file, "rb") as f:
         cakey = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM,
                                                f.read())
 
@@ -85,6 +121,15 @@ def teapv2_generate_near_expiry_cert(logdir):
     subject = cert.get_subject()
     subject.CN = "teapv2-pkcs10"
     cert.set_issuer(cacert.get_subject())
+    cert.set_version(2)
+    cert.add_extensions([
+        OpenSSL.crypto.X509Extension(b"basicConstraints", True,
+                                     b"CA:FALSE"),
+        OpenSSL.crypto.X509Extension(b"subjectKeyIdentifier", False,
+                                     b"hash", subject=cert),
+        OpenSSL.crypto.X509Extension(b"authorityKeyIdentifier", False,
+                                     b"keyid:always", issuer=cacert),
+    ])
     cert.sign(cakey, "sha256")
 
     cert_file = os.path.join(logdir, "teapv2-expiring.pem")
@@ -160,9 +205,20 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
 
-    client_cert, client_key = teapv2_generate_near_expiry_cert(params['logdir'])
+    sign_cert, sign_key = teapv2_generate_signing_ca(params['logdir'])
+    client_cert, client_key = teapv2_generate_near_expiry_cert(
+        params['logdir'], sign_cert, sign_key)
+    ca_bundle = os.path.join(params['logdir'], "teapv2-ca-bundle.pem")
+    with open(ca_bundle, "wb") as f:
+        with open("auth_serv/ca.pem", "rb") as src:
+            f.write(src.read())
+        with open(sign_cert, "rb") as src:
+            f.write(src.read())
     server_params = int_teapv2_server_params(
         eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1")
+    server_params['ca_cert'] = ca_bundle
+    server_params['teapv2_pkcs7_cert'] = sign_cert
+    server_params['teapv2_pkcs7_key'] = sign_key
     hapd = hostapd.add_ap(apdev[0], server_params)
 
     net_id = eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
@@ -214,9 +270,20 @@ def test_eap_teapv2_pkcs10_request_action_ignore(dev, apdev, params):
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
 
-    client_cert, client_key = teapv2_generate_near_expiry_cert(params['logdir'])
+    sign_cert, sign_key = teapv2_generate_signing_ca(params['logdir'])
+    client_cert, client_key = teapv2_generate_near_expiry_cert(
+        params['logdir'], sign_cert, sign_key)
+    ca_bundle = os.path.join(params['logdir'], "teapv2-ca-bundle.pem")
+    with open(ca_bundle, "wb") as f:
+        with open("auth_serv/ca.pem", "rb") as src:
+            f.write(src.read())
+        with open(sign_cert, "rb") as src:
+            f.write(src.read())
     server_params = int_teapv2_server_params(
         eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1")
+    server_params['ca_cert'] = ca_bundle
+    server_params['teapv2_pkcs7_cert'] = sign_cert
+    server_params['teapv2_pkcs7_key'] = sign_key
     hapd = hostapd.add_ap(apdev[0], server_params)
 
     eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
