@@ -365,6 +365,12 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 		cfg->server_cert = os_strdup(hapd->conf->server_cert);
 	if (hapd->conf->private_key)
 		cfg->private_key = os_strdup(hapd->conf->private_key);
+	if (hapd->conf->teapv2_pkcs7_cert)
+		cfg->teapv2_pkcs7_cert =
+			os_strdup(hapd->conf->teapv2_pkcs7_cert);
+	if (hapd->conf->teapv2_pkcs7_key)
+		cfg->teapv2_pkcs7_key =
+			os_strdup(hapd->conf->teapv2_pkcs7_key);
 	cfg->erp = hapd->conf->eap_server_erp;
 #ifdef CONFIG_TESTING_OPTIONS
 	cfg->skip_prot_success = hapd->conf->eap_skip_prot_success;

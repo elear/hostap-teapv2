@@ -438,6 +438,8 @@ struct hostapd_bss_config {
 	char *private_key2;
 	char *private_key_passwd;
 	char *private_key_passwd2;
+	char *teapv2_pkcs7_cert;
+	char *teapv2_pkcs7_key;
 	char *check_cert_subject;
 	int check_crl;
 	int check_crl_strict;

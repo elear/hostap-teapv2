@@ -1462,7 +1462,10 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 		wpabuf_free(data->pkcs7_cert);
 		data->pkcs7_cert = tls_connection_sign_pkcs7(
 			sm->cfg->ssl_ctx, tlv.pkcs10, tlv.pkcs10_len,
-			sm->cfg->server_cert, sm->cfg->private_key);
+			sm->cfg->teapv2_pkcs7_cert ?
+			sm->cfg->teapv2_pkcs7_cert : sm->cfg->server_cert,
+			sm->cfg->teapv2_pkcs7_key ?
+			sm->cfg->teapv2_pkcs7_key : sm->cfg->private_key);
 		wpabuf_free(data->pkcs10_csr);
 		data->pkcs10_csr = wpabuf_alloc_copy(tlv.pkcs10,
 								tlv.pkcs10_len);

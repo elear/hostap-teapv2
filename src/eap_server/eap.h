@@ -264,6 +264,8 @@ struct eap_config {
 	size_t server_id_len;
 	char *server_cert;
 	char *private_key;
+	char *teapv2_pkcs7_cert;
+	char *teapv2_pkcs7_key;
 
 	/**
 	 * erp - Whether EAP Re-authentication Protocol (ERP) is enabled

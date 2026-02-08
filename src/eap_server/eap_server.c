@@ -2103,5 +2103,7 @@ void eap_server_config_free(struct eap_config *cfg)
 	os_free(cfg->server_id);
 	os_free(cfg->server_cert);
 	os_free(cfg->private_key);
+	os_free(cfg->teapv2_pkcs7_cert);
+	os_free(cfg->teapv2_pkcs7_key);
 	os_free(cfg);
 }
