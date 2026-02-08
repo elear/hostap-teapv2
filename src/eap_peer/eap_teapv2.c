@@ -1389,16 +1389,23 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 
 	if (tlv.request_action == TEAPV2_REQUEST_ACTION_PROCESS_TLV &&
 	    tlv.request_action_tlvs_type == TEAPV2_TLV_PKCS10) {
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Generating PKCS#10 response");
-		tmp = eap_teapv2_build_pkcs10_tlv(sm, data);
-		if (!tmp) {
-			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Failed to build PKCS#10 TLV");
-			failed = 1;
-			goto done;
+		struct eap_peer_config *config = eap_get_config(sm);
+
+		if (config && config->teapv2_ignore_request_action_pkcs10) {
+			wpa_printf(MSG_DEBUG,
+				   "EAP-TEAPV2: Ignoring Request-Action for PKCS#10 CSR");
+		} else {
+			wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Generating PKCS#10 response");
+			tmp = eap_teapv2_build_pkcs10_tlv(sm, data);
+			if (!tmp) {
+				wpa_printf(MSG_INFO,
+					"EAP-TEAPV2: Failed to build PKCS#10 TLV");
+				failed = 1;
+				goto done;
+			}
+			resp = wpabuf_concat(resp, tmp);
+			goto send_resp;
 		}
-		resp = wpabuf_concat(resp, tmp);
-		goto send_resp;
 	}
 
 	if (tlv.pkcs7) {
