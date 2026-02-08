@@ -63,7 +63,7 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
             eap_teapv2_trusted_server_root
     return params
 
-def teapv2_generate_signing_ca(logdir):
+def teapv2_generate_ca(logdir, name, prefix):
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
 
@@ -76,7 +76,7 @@ def teapv2_generate_signing_ca(logdir):
     cert.gmtime_adj_notAfter(3650 * 24 * 3600)
     cert.set_pubkey(key)
     subject = cert.get_subject()
-    subject.CN = "teapv2-signing-ca"
+    subject.CN = name
     cert.set_issuer(subject)
     cert.set_version(2)
     cert.add_extensions([
@@ -89,8 +89,8 @@ def teapv2_generate_signing_ca(logdir):
     ])
     cert.sign(key, "sha256")
 
-    cert_file = os.path.join(logdir, "teapv2-signing-ca.pem")
-    key_file = os.path.join(logdir, "teapv2-signing-ca.key")
+    cert_file = os.path.join(logdir, prefix + ".pem")
+    key_file = os.path.join(logdir, prefix + ".key")
     with open(cert_file, "wb") as f:
         f.write(OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
                                                 cert))
@@ -99,7 +99,15 @@ def teapv2_generate_signing_ca(logdir):
                                                key))
     return cert_file, key_file
 
-def teapv2_generate_near_expiry_cert(logdir, ca_cert_file, ca_key_file):
+def teapv2_generate_signing_ca(logdir):
+    return teapv2_generate_ca(logdir, "teapv2-signing-ca",
+                              "teapv2-signing-ca")
+
+def teapv2_generate_other_ca(logdir):
+    return teapv2_generate_ca(logdir, "teapv2-other-ca", "teapv2-other-ca")
+
+def teapv2_generate_client_cert(logdir, ca_cert_file, ca_key_file, cn,
+                                days_valid, prefix):
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
 
@@ -116,10 +124,10 @@ def teapv2_generate_near_expiry_cert(logdir, ca_cert_file, ca_key_file):
     cert = OpenSSL.crypto.X509()
     cert.set_serial_number(random.randint(1, 1000000))
     cert.gmtime_adj_notBefore(-365 * 24 * 3600)
-    cert.gmtime_adj_notAfter(20 * 24 * 3600)
+    cert.gmtime_adj_notAfter(days_valid * 24 * 3600)
     cert.set_pubkey(key)
     subject = cert.get_subject()
-    subject.CN = "teapv2-pkcs10"
+    subject.CN = cn
     cert.set_issuer(cacert.get_subject())
     cert.set_version(2)
     cert.add_extensions([
@@ -132,8 +140,8 @@ def teapv2_generate_near_expiry_cert(logdir, ca_cert_file, ca_key_file):
     ])
     cert.sign(cakey, "sha256")
 
-    cert_file = os.path.join(logdir, "teapv2-expiring.pem")
-    key_file = os.path.join(logdir, "teapv2-expiring.key")
+    cert_file = os.path.join(logdir, prefix + ".pem")
+    key_file = os.path.join(logdir, prefix + ".key")
     with open(cert_file, "wb") as f:
         f.write(OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM,
                                                 cert))
@@ -141,6 +149,11 @@ def teapv2_generate_near_expiry_cert(logdir, ca_cert_file, ca_key_file):
         f.write(OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM,
                                                key))
     return cert_file, key_file
+
+def teapv2_generate_near_expiry_cert(logdir, ca_cert_file, ca_key_file):
+    return teapv2_generate_client_cert(logdir, ca_cert_file, ca_key_file,
+                                       "teapv2-pkcs10", 20,
+                                       "teapv2-expiring")
 
 def test_eap_teap_eap_mschapv2(dev, apdev):
     """EAP-TEAP with inner EAP-MSCHAPv2"""
@@ -307,6 +320,77 @@ def test_eap_teapv2_pkcs10_request_action_ignore(dev, apdev, params):
                      None)
     if key_blob or cert_blob:
         raise Exception("PKCS#10/PKCS#7 blobs unexpectedly stored")
+
+def test_eap_teapv2_pkcs10_request_action_untrusted(dev, apdev, params):
+    """EAP-TEAPV2 PKCS#10 Request-Action for untrusted client cert issuer"""
+    check_eap_capa(dev[0], "TEAPV2")
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    sign_cert, sign_key = teapv2_generate_signing_ca(params['logdir'])
+    other_ca_cert, other_ca_key = teapv2_generate_other_ca(params['logdir'])
+    client_cert, client_key = teapv2_generate_client_cert(
+        params['logdir'], other_ca_cert, other_ca_key, "teapv2-untrusted",
+        365, "teapv2-untrusted")
+    ca_bundle = os.path.join(params['logdir'], "teapv2-ca-bundle.pem")
+    with open(ca_bundle, "wb") as f:
+        with open("auth_serv/ca.pem", "rb") as src:
+            f.write(src.read())
+        with open(sign_cert, "rb") as src:
+            f.write(src.read())
+        with open(other_ca_cert, "rb") as src:
+            f.write(src.read())
+
+    server_params = int_teapv2_server_params(
+        eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="0")
+    server_params['eap_teapv2_request_action_pkcs10_untrusted'] = "1"
+    server_params['ca_cert'] = ca_bundle
+    server_params['teapv2_pkcs7_cert'] = sign_cert
+    server_params['teapv2_pkcs7_key'] = sign_key
+    hapd = hostapd.add_ap(apdev[0], server_params)
+
+    net_id = eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-untrusted",
+                         anonymous_identity="TEAPV2",
+                         ca_cert="auth_serv/ca.pem",
+                         client_cert=client_cert, private_key=client_key)
+    if "OK" not in dev[0].request("SET update_config 1"):
+        raise Exception("Failed to set update_config")
+    dev[0].save_config()
+    conf_file = os.path.join(params['logdir'],
+                             "p2p%s.conf" % dev[0].ifname[4:])
+    with open(conf_file, "r") as f:
+        conf_data = f.read()
+    if "update_config=1" not in conf_data:
+        raise Exception("update_config=1 not stored in config file")
+
+    blobs = dev[0].request("LIST_BLOBS")
+    blob_list = []
+    for b in blobs.splitlines():
+        b = b.strip()
+        if not b:
+            continue
+        if b.startswith("blob "):
+            b = b[5:]
+        blob_list.append(b)
+    key_blob = next((b for b in blob_list if b.startswith("teapv2-user-key")),
+                    None)
+    cert_blob = next((b for b in blob_list if b.startswith("teapv2-user-cert")),
+                     None)
+    if not key_blob:
+        raise Exception("PKCS#10 response blob not stored")
+    if not cert_blob:
+        raise Exception("PKCS#7 certificate blob not stored")
+
+    cert_data = dev[0].request("GET_BLOB " + cert_blob)
+    if not cert_data:
+        raise Exception("Failed to read PKCS#7 certificate blob")
+    if "BEGIN CERTIFICATE" not in cert_data:
+        raise Exception("Stored PKCS#7 certificate blob missing certificate")
+    if "client_cert=\"blob://%s\"" % cert_blob not in conf_data:
+        raise Exception("PKCS#7 client_cert not stored in config file")
+    client_cert_ref = dev[0].request("GET_NETWORK %d client_cert" % net_id)
+    if client_cert_ref != "\"blob://" + cert_blob + '\"':
+        raise Exception("Stored PKCS#7 certificate not set as client_cert")
 
 def test_eap_teap_eap_pwd(dev, apdev):
     """EAP-TEAP with inner EAP-PWD"""
