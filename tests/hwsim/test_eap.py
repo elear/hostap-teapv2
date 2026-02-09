@@ -86,6 +86,23 @@ def teapv2_build_csr_attrs_serial_number(sn):
     seq = der(0x30, attr)
     return base64.b64encode(seq).decode("ascii")
 
+def teapv2_build_csr_attrs_alg_oid(oid_der):
+    def der_len(n):
+        if n < 0x80:
+            return bytes([n])
+        out = []
+        while n:
+            out.insert(0, n & 0xff)
+            n >>= 8
+        return bytes([0x80 | len(out)] + out)
+
+    def der(tag, payload):
+        return bytes([tag]) + der_len(len(payload)) + payload
+
+    oid = bytes([0x06]) + der_len(len(oid_der)) + oid_der
+    seq = der(0x30, oid)
+    return base64.b64encode(seq).decode("ascii")
+
 def teapv2_generate_ca(logdir, name, prefix):
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
@@ -359,6 +376,64 @@ def test_eap_teapv2_csrattrs_sn(dev, apdev, params):
     sn = subject.get(b"serialNumber", b"").decode("utf-8")
     if sn != peer_serial:
         raise Exception("Unexpected certificate serialNumber: " + sn)
+
+def run_eap_teapv2_csrattrs_alg(dev, apdev, params, csrattrs, desc):
+    check_eap_capa(dev[0], "TEAPV2")
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    sign_cert, sign_key = teapv2_generate_signing_ca(params['logdir'])
+    client_cert, client_key = teapv2_generate_near_expiry_cert(
+        params['logdir'], sign_cert, sign_key)
+    ca_bundle = os.path.join(params['logdir'], "teapv2-ca-bundle.pem")
+    with open(ca_bundle, "wb") as f:
+        with open("auth_serv/ca.pem", "rb") as src:
+            f.write(src.read())
+        with open(sign_cert, "rb") as src:
+            f.write(src.read())
+
+    server_params = int_teapv2_server_params(
+        eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1",
+        eap_teapv2_csrattrs=csrattrs)
+    server_params['ca_cert'] = ca_bundle
+    server_params['teapv2_pkcs7_cert'] = sign_cert
+    server_params['teapv2_pkcs7_key'] = sign_key
+    hapd = hostapd.add_ap(apdev[0], server_params)
+
+    eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
+                anonymous_identity="TEAPV2",
+                ca_cert="auth_serv/ca.pem",
+                client_cert=client_cert, private_key=client_key)
+
+    blobs = dev[0].request("LIST_BLOBS")
+    blob_list = []
+    for b in blobs.splitlines():
+        b = b.strip()
+        if not b:
+            continue
+        if b.startswith("blob "):
+            b = b[5:]
+        blob_list.append(b)
+    cert_blob = next((b for b in blob_list if b.startswith("teapv2-user-cert")),
+                     None)
+    if not cert_blob:
+        raise Exception("PKCS#7 certificate blob not stored (" + desc + ")")
+
+def test_eap_teapv2_csrattrs_ecdsa_sha256(dev, apdev, params):
+    """EAP-TEAPV2 CSR-Attributes with ecdsa-with-SHA256 OID"""
+    # 1.2.840.10045.4.3.2
+    csrattrs = teapv2_build_csr_attrs_alg_oid(
+        b"\x2a\x86\x48\xce\x3d\x04\x03\x02")
+    run_eap_teapv2_csrattrs_alg(dev, apdev, params, csrattrs,
+                                "ecdsa-with-SHA256")
+
+def test_eap_teapv2_csrattrs_rsa_sha384(dev, apdev, params):
+    """EAP-TEAPV2 CSR-Attributes with sha384WithRSAEncryption OID"""
+    # 1.2.840.113549.1.1.12
+    csrattrs = teapv2_build_csr_attrs_alg_oid(
+        b"\x2a\x86\x48\x86\xf7\x0d\x01\x01\x0c")
+    run_eap_teapv2_csrattrs_alg(dev, apdev, params, csrattrs,
+                                "sha384WithRSAEncryption")
 
 def test_eap_teapv2_pkcs10_request_action_ignore(dev, apdev, params):
     """EAP-TEAPV2 ignore PKCS#10 Request-Action and still complete"""
