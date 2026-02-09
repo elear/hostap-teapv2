@@ -384,6 +384,9 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 			case 4:
 				name = CSR_NAME_SN;
 				break;
+			case 5:
+				name = CSR_NAME_SERIAL_NUMBER;
+				break;
 			case 6:
 				name = CSR_NAME_C;
 				break;

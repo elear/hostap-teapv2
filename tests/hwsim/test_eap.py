@@ -43,7 +43,8 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
                              eap_teapv2_id=None,
                              eap_teapv2_method_sequence=None,
                              eap_teapv2_request_action_pkcs10=None,
-                             eap_teapv2_trusted_server_root=None):
+                             eap_teapv2_trusted_server_root=None,
+                             eap_teapv2_csrattrs=None):
     params = int_eap_server_params()
     params['eap_fast_a_id'] = "101112131415161718191a1b1c1dff00"
     params['eap_fast_a_id_info'] = "test server 0"
@@ -61,7 +62,29 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
     if eap_teapv2_trusted_server_root is not None:
         params['eap_teapv2_trusted_server_root'] = \
             eap_teapv2_trusted_server_root
+    if eap_teapv2_csrattrs is not None:
+        params['eap_teapv2_csrattrs'] = eap_teapv2_csrattrs
     return params
+
+def teapv2_build_csr_attrs_serial_number(sn):
+    def der_len(n):
+        if n < 0x80:
+            return bytes([n])
+        out = []
+        while n:
+            out.insert(0, n & 0xff)
+            n >>= 8
+        return bytes([0x80 | len(out)] + out)
+
+    def der(tag, payload):
+        return bytes([tag]) + der_len(len(payload)) + payload
+
+    oid_sn = b"\x06\x03\x55\x04\x05"  # 2.5.4.5 (serialNumber)
+    val = der(0x0c, sn.encode("utf-8"))
+    setv = der(0x31, val)
+    attr = der(0x30, oid_sn + setv)
+    seq = der(0x30, attr)
+    return base64.b64encode(seq).decode("ascii")
 
 def teapv2_generate_ca(logdir, name, prefix):
     if not openssl_imported:
@@ -276,6 +299,66 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
     client_cert_ref = dev[0].request("GET_NETWORK %d client_cert" % net_id)
     if client_cert_ref != "\"blob://" + cert_blob + '\"':
         raise Exception("Stored PKCS#7 certificate not set as client_cert")
+
+def test_eap_teapv2_csrattrs_sn(dev, apdev, params):
+    """EAP-TEAPV2 CSR-Attributes with surname based on configured serial number"""
+    check_eap_capa(dev[0], "TEAPV2")
+    if not openssl_imported:
+        raise HwsimSkip("OpenSSL python module not available")
+
+    peer_serial = "teapv2-serial-1234"
+    dev[0].set("serial_number", peer_serial)
+
+    sign_cert, sign_key = teapv2_generate_signing_ca(params['logdir'])
+    client_cert, client_key = teapv2_generate_near_expiry_cert(
+        params['logdir'], sign_cert, sign_key)
+    ca_bundle = os.path.join(params['logdir'], "teapv2-ca-bundle.pem")
+    with open(ca_bundle, "wb") as f:
+        with open("auth_serv/ca.pem", "rb") as src:
+            f.write(src.read())
+        with open(sign_cert, "rb") as src:
+            f.write(src.read())
+
+    csrattrs = teapv2_build_csr_attrs_serial_number(peer_serial)
+    server_params = int_teapv2_server_params(
+        eap_teapv2_auth="2", eap_teapv2_request_action_pkcs10="1",
+        eap_teapv2_csrattrs=csrattrs)
+    server_params['ca_cert'] = ca_bundle
+    server_params['teapv2_pkcs7_cert'] = sign_cert
+    server_params['teapv2_pkcs7_key'] = sign_key
+    hapd = hostapd.add_ap(apdev[0], server_params)
+
+    eap_connect(dev[0], hapd, "TEAPV2", "/CN=teapv2-pkcs10",
+                anonymous_identity="TEAPV2",
+                ca_cert="auth_serv/ca.pem",
+                client_cert=client_cert, private_key=client_key)
+
+    blobs = dev[0].request("LIST_BLOBS")
+    blob_list = []
+    for b in blobs.splitlines():
+        b = b.strip()
+        if not b:
+            continue
+        if b.startswith("blob "):
+            b = b[5:]
+        blob_list.append(b)
+    cert_blob = next((b for b in blob_list if b.startswith("teapv2-user-cert")),
+                     None)
+    if not cert_blob:
+        raise Exception("PKCS#7 certificate blob not stored")
+
+    cert_data = dev[0].request("GET_BLOB " + cert_blob)
+    if not cert_data:
+        raise Exception("Failed to read PKCS#7 certificate blob")
+    if "BEGIN CERTIFICATE" not in cert_data:
+        raise Exception("Stored PKCS#7 certificate blob missing certificate")
+
+    cert = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM,
+                                           cert_data.encode("utf-8"))
+    subject = dict(cert.get_subject().get_components())
+    sn = subject.get(b"serialNumber", b"").decode("utf-8")
+    if sn != peer_serial:
+        raise Exception("Unexpected certificate serialNumber: " + sn)
 
 def test_eap_teapv2_pkcs10_request_action_ignore(dev, apdev, params):
     """EAP-TEAPV2 ignore PKCS#10 Request-Action and still complete"""

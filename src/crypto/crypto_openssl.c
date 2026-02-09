@@ -4411,6 +4411,9 @@ int crypto_csr_set_name(struct crypto_csr *csr, enum crypto_csr_name type,
 	case CSR_NAME_SN:
 		nid = NID_surname;
 		break;
+	case CSR_NAME_SERIAL_NUMBER:
+		nid = NID_serialNumber;
+		break;
 	case CSR_NAME_C:
 		nid = NID_countryName;
 		break;
