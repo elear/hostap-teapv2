@@ -15,6 +15,7 @@
 #include "eap_i.h"
 #include "eap_tls_common.h"
 #include "base64.h"
+#include "tls/asn1.h"
 #include "eap_config.h"
 #ifdef CONFIG_TLS_INTERNAL
 #include "tls/x509v3.h"
@@ -288,6 +289,152 @@ static int eap_teapv2_populate_csr_subject(struct eap_sm *sm,
 	return -1;
 }
 
+static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
+				      const struct wpabuf *csr_attrs,
+				      bool *name_set)
+{
+	const u8 *pos, *end, *seq_end;
+	struct asn1_hdr hdr, set_hdr, val_hdr;
+	struct asn1_oid oid;
+	int ret = 0;
+
+	if (name_set)
+		*name_set = false;
+	if (!csr || !csr_attrs)
+		return 0;
+
+	pos = wpabuf_head(csr_attrs);
+	end = pos + wpabuf_len(csr_attrs);
+
+	if (asn1_get_sequence(pos, end - pos, &hdr, &seq_end) < 0 ||
+	    seq_end != end) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Invalid CSR Attributes DER");
+		return -1;
+	}
+
+	pos = hdr.payload;
+	while (pos < seq_end) {
+		const u8 *attr_pos, *attr_end;
+
+		if (asn1_get_next(pos, seq_end - pos, &hdr) < 0)
+			return -1;
+
+		if (hdr.class == ASN1_CLASS_UNIVERSAL &&
+		    hdr.tag == ASN1_TAG_OID) {
+			/* AttrOrOID with just OID - ignore */
+			pos = hdr.payload + hdr.length;
+			continue;
+		}
+
+		if (hdr.class != ASN1_CLASS_UNIVERSAL ||
+		    hdr.tag != ASN1_TAG_SEQUENCE) {
+			wpa_printf(MSG_DEBUG,
+				   "EAP-TEAPV2: Ignore unexpected CSR Attributes element (class=%u tag=%u)",
+				   hdr.class, hdr.tag);
+			pos = hdr.payload + hdr.length;
+			continue;
+		}
+
+		/* Attribute ::= SEQUENCE { type OID, values SET OF AttributeValue } */
+		attr_pos = hdr.payload;
+		attr_end = hdr.payload + hdr.length;
+		if (asn1_get_oid(attr_pos, attr_end - attr_pos, &oid,
+				 &attr_pos) < 0)
+			return -1;
+
+		if (asn1_get_next(attr_pos, attr_end - attr_pos, &set_hdr) < 0 ||
+		    !asn1_is_set(&set_hdr)) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: CSR Attributes missing SET OF values");
+			return -1;
+		}
+
+		attr_pos = set_hdr.payload;
+		if (attr_pos >= set_hdr.payload + set_hdr.length) {
+			/* Empty SET */
+			pos = attr_end;
+			continue;
+		}
+
+		if (asn1_get_next(attr_pos,
+				  set_hdr.payload + set_hdr.length - attr_pos,
+				  &val_hdr) < 0)
+			return -1;
+
+		if (!asn1_is_string_type(&val_hdr)) {
+			wpa_printf(MSG_DEBUG,
+				   "EAP-TEAPV2: Ignore non-string CSR Attribute value (tag 0x%x)",
+				   val_hdr.tag);
+			pos = attr_end;
+			continue;
+		}
+
+		/* id-at ::= 2.5.4 */
+		if (oid.len == 4 &&
+		    oid.oid[0] == 2 && oid.oid[1] == 5 && oid.oid[2] == 4) {
+			enum crypto_csr_name name = CSR_NAME_CN;
+			bool supported = true;
+			char *tmp;
+
+			switch (oid.oid[3]) {
+			case 3:
+				name = CSR_NAME_CN;
+				break;
+			case 4:
+				name = CSR_NAME_SN;
+				break;
+			case 6:
+				name = CSR_NAME_C;
+				break;
+			case 10:
+				name = CSR_NAME_O;
+				break;
+			case 11:
+				name = CSR_NAME_OU;
+				break;
+			default:
+				supported = false;
+				break;
+			}
+
+			if (supported) {
+				tmp = os_malloc(val_hdr.length + 1);
+				if (!tmp)
+					return -1;
+				os_memcpy(tmp, val_hdr.payload, val_hdr.length);
+				tmp[val_hdr.length] = '\0';
+				if (crypto_csr_set_name(csr, name, tmp) < 0) {
+					wpa_printf(MSG_INFO,
+						   "EAP-TEAPV2: Failed to set CSR subject name");
+					ret = -1;
+				} else if (name_set) {
+					*name_set = true;
+				}
+				os_free(tmp);
+			}
+		} else if (oid.len == 7 &&
+			   oid.oid[0] == 1 && oid.oid[1] == 2 &&
+			   oid.oid[2] == 840 && oid.oid[3] == 113549 &&
+			   oid.oid[4] == 1 && oid.oid[5] == 9 &&
+			   oid.oid[6] == 7) {
+			/* pkcs-9-at-challengePassword */
+			if (crypto_csr_set_attribute(
+				    csr, CSR_ATTR_CHALLENGE_PASSWORD,
+				    val_hdr.tag, val_hdr.payload,
+				    val_hdr.length) < 0) {
+				wpa_printf(MSG_INFO,
+					   "EAP-TEAPV2: Failed to set CSR challengePassword");
+				ret = -1;
+			}
+		}
+
+		pos = attr_end;
+	}
+
+	return ret;
+}
+
 
 static struct wpabuf *
 eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
@@ -298,6 +445,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	struct wpabuf *own_cert = NULL;
 	struct eap_peer_cert_config *cert_cfg;
 	const char *purpose;
+	bool name_set = false;
 
 	cert_cfg = eap_teapv2_current_cert_config(sm);
 	if (!cert_cfg) {
@@ -318,19 +466,22 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	if (!csr || crypto_csr_set_ec_public_key(csr, key))
 		goto fail;
 
+	own_cert = tls_connection_get_own_cert(data->ssl.conn);
 	if (data->csr_attrs) {
 		wpa_hexdump_buf(MSG_MSGDUMP,
 				"EAP-TEAPV2: CSR Attributes (RFC 9908)",
 				data->csr_attrs);
-		wpa_printf(MSG_DEBUG,
-			   "EAP-TEAPV2: CSR Attributes received but not yet applied to CSR");
+		if (eap_teapv2_apply_csr_attrs(csr, data->csr_attrs,
+					       &name_set) < 0)
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to apply CSR Attributes");
 	}
-
-	own_cert = tls_connection_get_own_cert(data->ssl.conn);
-	if (eap_teapv2_populate_csr_subject(sm, csr, own_cert) < 0) {
-		wpa_printf(MSG_INFO,
-			   "EAP-TEAPV2: Failed to set CSR subject from existing credentials");
-		goto fail;
+	if (!name_set) {
+		if (eap_teapv2_populate_csr_subject(sm, csr, own_cert) < 0) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to set CSR subject from existing credentials");
+			goto fail;
+		}
 	}
 	wpabuf_free(own_cert);
 	own_cert = NULL;
@@ -398,6 +549,8 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 		goto fail;
 	eap_teapv2_put_tlv_buf(tlv, TEAPV2_TLV_PKCS10, csr_der);
 	data->pkcs10_requested = true;
+	wpabuf_free(data->csr_attrs);
+	data->csr_attrs = NULL;
 
 fail:
 	wpabuf_free(data->csr_attrs);
