@@ -607,6 +607,18 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 		tlv->trusted_server_root = pos;
 		tlv->trusted_server_root_len = len;
 		break;
+	case TEAPV2_TLV_CSR_ATTRS:
+		if (tlv->csr_attrs) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: More than one CSR-Attributes TLV in the message");
+			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			return -2;
+		}
+		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: CSR-Attributes TLV",
+			   pos, len);
+		tlv->csr_attrs = pos;
+		tlv->csr_attrs_len = len;
+		break;
 	default:
 		/* Unknown TLV */
 		return -1;
@@ -653,6 +665,8 @@ const char * eap_teapv2_tlv_type_str(enum teapv2_tlv_types type)
 		return "PKCS#10";
 	case TEAPV2_TLV_TRUSTED_SERVER_ROOT:
 		return "Trusted-Server-Root";
+	case TEAPV2_TLV_CSR_ATTRS:
+		return "CSR-Attributes";
 	}
 
 	return "?";

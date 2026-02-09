@@ -346,6 +346,9 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 	if (hapd->conf->eap_teapv2_trusted_server_root)
 		cfg->eap_teapv2_trusted_server_root =
 			os_strdup(hapd->conf->eap_teapv2_trusted_server_root);
+	if (hapd->conf->eap_teapv2_csrattrs)
+		cfg->eap_teapv2_csrattrs =
+			os_strdup(hapd->conf->eap_teapv2_csrattrs);
 	cfg->eap_sim_aka_result_ind = hapd->conf->eap_sim_aka_result_ind;
 	cfg->eap_sim_id = hapd->conf->eap_sim_id;
 	cfg->imsi_privacy_key = hapd->imsi_privacy_key;

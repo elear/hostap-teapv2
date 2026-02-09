@@ -12,6 +12,7 @@
 #include "crypto/tls.h"
 #include "crypto/random.h"
 #include "base64.h"
+#include "tls/asn1.h"
 #include "eap_common/eap_teapv2_common.h"
 #include "eap_i.h"
 #include "eap_tls_common.h"
@@ -72,6 +73,7 @@ struct eap_teapv2_data {
 	struct wpabuf *pkcs10_csr;
 	bool pkcs10_expected;
 	struct wpabuf *trusted_server_root;
+	struct wpabuf *csr_attrs;
 };
 
 
@@ -125,6 +127,38 @@ eap_teapv2_load_trusted_server_root(const char *path)
 	cert = wpabuf_alloc_copy(buf, len);
 	os_free(buf);
 	return cert;
+}
+
+static struct wpabuf * eap_teapv2_load_csr_attrs(const char *val)
+{
+	u8 *der;
+	size_t der_len;
+	struct wpabuf *attrs;
+	struct asn1_hdr hdr;
+	const u8 *end = NULL;
+
+	if (!val || !*val)
+		return NULL;
+
+	der = base64_decode(val, os_strlen(val), &der_len);
+	if (!der || !der_len) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Failed to decode CSR Attributes (base64)");
+		os_free(der);
+		return NULL;
+	}
+
+	if (asn1_get_sequence(der, der_len, &hdr, &end) < 0 ||
+	    end != der + der_len) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: CSR Attributes is not a DER SEQUENCE");
+		os_free(der);
+		return NULL;
+	}
+
+	attrs = wpabuf_alloc_copy(der, der_len);
+	os_free(der);
+	return attrs;
 }
 
 static bool eap_teapv2_cert_near_expiry(struct eap_sm *sm,
@@ -358,6 +392,15 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 			return NULL;
 		}
 	}
+	if (sm->cfg->eap_teapv2_csrattrs) {
+		data->csr_attrs =
+			eap_teapv2_load_csr_attrs(
+				sm->cfg->eap_teapv2_csrattrs);
+		if (!data->csr_attrs) {
+			eap_teapv2_reset(sm, data);
+			return NULL;
+		}
+	}
 	data->cb_required = false;
 	return data;
 }
@@ -380,6 +423,7 @@ static void eap_teapv2_reset(struct eap_sm *sm, void *priv)
 	wpabuf_free(data->server_outer_tlvs);
 	wpabuf_free(data->peer_outer_tlvs);
 	wpabuf_free(data->trusted_server_root);
+	wpabuf_free(data->csr_attrs);
 	os_free(data->identity);
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
@@ -472,7 +516,7 @@ static struct wpabuf *
 eap_teapv2_add_request_action(struct eap_teapv2_data *data,
 			      struct wpabuf *msg)
 {
-	struct wpabuf *tlv;
+	struct wpabuf *tlv, *csr_tlv = NULL;
 
 	if (!msg || !data->request_pkcs10)
 		return msg;
@@ -487,6 +531,21 @@ eap_teapv2_add_request_action(struct eap_teapv2_data *data,
 	wpabuf_put_u8(tlv, TEAPV2_STATUS_SUCCESS);
 	wpabuf_put_u8(tlv, TEAPV2_REQUEST_ACTION_PROCESS_TLV);
 	wpabuf_put_be16(tlv, TEAPV2_TLV_PKCS10);
+
+	if (data->csr_attrs) {
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: Add CSR-Attributes TLV (RFC 9908)");
+		csr_tlv = wpabuf_alloc(sizeof(struct teapv2_tlv_hdr) +
+				       wpabuf_len(data->csr_attrs));
+		if (!csr_tlv) {
+			wpabuf_free(msg);
+			wpabuf_free(tlv);
+			return NULL;
+		}
+		eap_teapv2_put_tlv_buf(csr_tlv, TEAPV2_TLV_CSR_ATTRS,
+				       data->csr_attrs);
+		tlv = wpabuf_concat(tlv, csr_tlv);
+	}
 
 	data->request_pkcs10 = false;
 	data->pkcs10_expected = true;

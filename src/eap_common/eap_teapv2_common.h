@@ -144,6 +144,7 @@ enum teapv2_tlv_types {
 	TEAPV2_TLV_PKCS7 = 15,
 	TEAPV2_TLV_PKCS10 = 16,
 	TEAPV2_TLV_TRUSTED_SERVER_ROOT = 17,
+	TEAPV2_TLV_CSR_ATTRS = 18,
 };
 
 enum teapv2_tlv_result_status {
@@ -205,6 +206,8 @@ struct eap_teapv2_tlv_parse {
 	size_t pkcs7_len;
 	u8 *trusted_server_root;
 	size_t trusted_server_root_len;
+	u8 *csr_attrs;
+	size_t csr_attrs_len;
 };
 
 void eap_teapv2_put_tlv_hdr(struct wpabuf *buf, u16 type, u16 len);

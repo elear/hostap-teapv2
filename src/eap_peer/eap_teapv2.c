@@ -60,6 +60,7 @@ struct eap_teapv2_data {
 	bool pkcs7_success;
 	bool cb_required;
 	bool client_authenticated;
+	struct wpabuf *csr_attrs;
 
 	struct wpabuf *pending_phase2_req;
 	struct wpabuf *pending_resp;
@@ -317,6 +318,14 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	if (!csr || crypto_csr_set_ec_public_key(csr, key))
 		goto fail;
 
+	if (data->csr_attrs) {
+		wpa_hexdump_buf(MSG_MSGDUMP,
+				"EAP-TEAPV2: CSR Attributes (RFC 9908)",
+				data->csr_attrs);
+		wpa_printf(MSG_DEBUG,
+			   "EAP-TEAPV2: CSR Attributes received but not yet applied to CSR");
+	}
+
 	own_cert = tls_connection_get_own_cert(data->ssl.conn);
 	if (eap_teapv2_populate_csr_subject(sm, csr, own_cert) < 0) {
 		wpa_printf(MSG_INFO,
@@ -391,6 +400,8 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	data->pkcs10_requested = true;
 
 fail:
+	wpabuf_free(data->csr_attrs);
+	data->csr_attrs = NULL;
 	wpabuf_clear_free(priv);
 	wpabuf_free(csr_der);
 	crypto_csr_deinit(csr);
@@ -516,6 +527,8 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	data->server_outer_tlvs = NULL;
 	wpabuf_free(data->peer_outer_tlvs);
 	data->peer_outer_tlvs = NULL;
+	wpabuf_free(data->csr_attrs);
+	data->csr_attrs = NULL;
 	forced_memzero(data->simck, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
@@ -1382,6 +1395,18 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 						   sm->use_machine_cred) < 0) {
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to update Phase 2 EAP types");
+			failed = 1;
+			goto done;
+		}
+	}
+
+	if (tlv.csr_attrs) {
+		wpabuf_free(data->csr_attrs);
+		data->csr_attrs = wpabuf_alloc_copy(tlv.csr_attrs,
+						    tlv.csr_attrs_len);
+		if (!data->csr_attrs) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to store CSR Attributes TLV");
 			failed = 1;
 			goto done;
 		}

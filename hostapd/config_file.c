@@ -2563,6 +2563,9 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "eap_teapv2_trusted_server_root") == 0) {
 		os_free(bss->eap_teapv2_trusted_server_root);
 		bss->eap_teapv2_trusted_server_root = os_strdup(pos);
+	} else if (os_strcmp(buf, "eap_teapv2_csrattrs") == 0) {
+		os_free(bss->eap_teapv2_csrattrs);
+		bss->eap_teapv2_csrattrs = os_strdup(pos);
 #endif /* EAP_SERVER_TEAPV2 */
 #ifdef EAP_SERVER_SIM
 	} else if (os_strcmp(buf, "eap_sim_db") == 0) {
