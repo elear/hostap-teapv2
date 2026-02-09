@@ -289,14 +289,65 @@ static int eap_teapv2_populate_csr_subject(struct eap_sm *sm,
 	return -1;
 }
 
+static bool eap_teapv2_oid_match(const struct asn1_oid *oid,
+				 const unsigned long *vals, size_t len)
+{
+	size_t i;
+
+	if (oid->len != len)
+		return false;
+	for (i = 0; i < len; i++) {
+		if (oid->oid[i] != vals[i])
+			return false;
+	}
+	return true;
+}
+
+static bool eap_teapv2_csrattrs_hash_from_oid(const struct asn1_oid *oid,
+					      enum crypto_hash_alg *alg)
+{
+	static const unsigned long oid_ecdsa_sha256[] = { 1, 2, 840, 10045, 4, 3, 2 };
+	static const unsigned long oid_ecdsa_sha384[] = { 1, 2, 840, 10045, 4, 3, 3 };
+	static const unsigned long oid_ecdsa_sha512[] = { 1, 2, 840, 10045, 4, 3, 4 };
+	static const unsigned long oid_rsa_sha256[] = { 1, 2, 840, 113549, 1, 1, 11 };
+	static const unsigned long oid_rsa_sha384[] = { 1, 2, 840, 113549, 1, 1, 12 };
+	static const unsigned long oid_rsa_sha512[] = { 1, 2, 840, 113549, 1, 1, 13 };
+	static const unsigned long oid_sha256[] = { 2, 16, 840, 1, 101, 3, 4, 2, 1 };
+	static const unsigned long oid_sha384[] = { 2, 16, 840, 1, 101, 3, 4, 2, 2 };
+	static const unsigned long oid_sha512[] = { 2, 16, 840, 1, 101, 3, 4, 2, 3 };
+
+	if (eap_teapv2_oid_match(oid, oid_ecdsa_sha256, ARRAY_SIZE(oid_ecdsa_sha256)) ||
+	    eap_teapv2_oid_match(oid, oid_rsa_sha256, ARRAY_SIZE(oid_rsa_sha256)) ||
+	    eap_teapv2_oid_match(oid, oid_sha256, ARRAY_SIZE(oid_sha256))) {
+		*alg = CRYPTO_HASH_ALG_SHA256;
+		return true;
+	}
+	if (eap_teapv2_oid_match(oid, oid_ecdsa_sha384, ARRAY_SIZE(oid_ecdsa_sha384)) ||
+	    eap_teapv2_oid_match(oid, oid_rsa_sha384, ARRAY_SIZE(oid_rsa_sha384)) ||
+	    eap_teapv2_oid_match(oid, oid_sha384, ARRAY_SIZE(oid_sha384))) {
+		*alg = CRYPTO_HASH_ALG_SHA384;
+		return true;
+	}
+	if (eap_teapv2_oid_match(oid, oid_ecdsa_sha512, ARRAY_SIZE(oid_ecdsa_sha512)) ||
+	    eap_teapv2_oid_match(oid, oid_rsa_sha512, ARRAY_SIZE(oid_rsa_sha512)) ||
+	    eap_teapv2_oid_match(oid, oid_sha512, ARRAY_SIZE(oid_sha512))) {
+		*alg = CRYPTO_HASH_ALG_SHA512;
+		return true;
+	}
+
+	return false;
+}
+
 static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 				      const struct wpabuf *csr_attrs,
-				      bool *name_set)
+				      bool *name_set,
+				      enum crypto_hash_alg *hash_alg)
 {
 	const u8 *pos, *end, *seq_end;
 	struct asn1_hdr hdr, set_hdr, val_hdr;
 	struct asn1_oid oid;
 	int ret = 0;
+	bool hash_set = false;
 
 	if (name_set)
 		*name_set = false;
@@ -322,7 +373,22 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 
 		if (hdr.class == ASN1_CLASS_UNIVERSAL &&
 		    hdr.tag == ASN1_TAG_OID) {
-			/* AttrOrOID with just OID - ignore */
+			/* AttrOrOID with just OID */
+			if (hash_alg &&
+			    asn1_parse_oid(hdr.payload, hdr.length, &oid) == 0) {
+				enum crypto_hash_alg alg;
+
+				if (eap_teapv2_csrattrs_hash_from_oid(&oid, &alg)) {
+					if (!hash_set) {
+						*hash_alg = alg;
+						hash_set = true;
+					} else if (*hash_alg != alg) {
+						wpa_printf(MSG_DEBUG,
+							   "EAP-TEAPV2: Multiple hash algorithms in CSR Attributes; keeping first");
+					}
+				}
+			}
+
 			pos = hdr.payload + hdr.length;
 			continue;
 		}
@@ -449,6 +515,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	struct eap_peer_cert_config *cert_cfg;
 	const char *purpose;
 	bool name_set = false;
+	enum crypto_hash_alg hash_alg = CRYPTO_HASH_ALG_SHA256;
 
 	cert_cfg = eap_teapv2_current_cert_config(sm);
 	if (!cert_cfg) {
@@ -475,7 +542,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 				"EAP-TEAPV2: CSR Attributes (RFC 9908)",
 				data->csr_attrs);
 		if (eap_teapv2_apply_csr_attrs(csr, data->csr_attrs,
-					       &name_set) < 0)
+					       &name_set, &hash_alg) < 0)
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to apply CSR Attributes");
 	}
@@ -489,7 +556,7 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	wpabuf_free(own_cert);
 	own_cert = NULL;
 
-	csr_der = crypto_csr_sign(csr, key, CRYPTO_HASH_ALG_SHA256);
+	csr_der = crypto_csr_sign(csr, key, hash_alg);
 	if (!csr_der)
 		goto fail;
 	wpa_hexdump_buf(MSG_MSGDUMP, "EAP-TEAPV2: PKCS#10 CSR (DER)",
