@@ -318,7 +318,7 @@ def test_eap_teapv2_pkcs10_request_action(dev, apdev, params):
         raise Exception("Stored PKCS#7 certificate not set as client_cert")
 
 def test_eap_teapv2_csrattrs_sn(dev, apdev, params):
-    """EAP-TEAPV2 CSR-Attributes with surname based on configured serial number"""
+    """EAP-TEAPV2 CSR-Attributes with serialNumber based on configured serial number"""
     check_eap_capa(dev[0], "TEAPV2")
     if not openssl_imported:
         raise HwsimSkip("OpenSSL python module not available")
