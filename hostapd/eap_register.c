@@ -149,5 +149,10 @@ int eap_server_register_methods(void)
 		ret = eap_server_eke_register();
 #endif /* EAP_SERVER_EKE */
 
+#ifdef EAP_SERVER_PPT
+	if (ret == 0)
+		ret = eap_server_ppt_register();
+#endif /* EAP_SERVER_PPT */
+
 	return ret;
 }

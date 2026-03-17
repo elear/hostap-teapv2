@@ -500,6 +500,11 @@ NEED_DH_GROUPS=y
 NEED_DH_GROUPS_ALL=y
 endif
 
+ifdef CONFIG_EAP_PPT
+CFLAGS += -DEAP_SERVER_PPT
+OBJS += ../src/eap_server/eap_server_ppt.o
+endif
+
 ifdef CONFIG_EAP_VENDOR_TEST
 CFLAGS += -DEAP_SERVER_VENDOR_TEST
 OBJS += ../src/eap_server/eap_server_vendor_test.o

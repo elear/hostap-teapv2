@@ -895,6 +895,13 @@ NEED_DH_GROUPS_ALL=y
 NEED_AES_CBC=y
 endif
 
+ifdef CONFIG_EAP_PPT
+# EAP-PPT (draft-ietf-emu-eap-ppt)
+CFLAGS += -DEAP_PPT
+OBJS += ../src/eap_peer/eap_ppt.o
+CONFIG_IEEE8021X_EAPOL=y
+endif
+
 ifdef CONFIG_WPS
 # EAP-WSC
 CFLAGS += -DCONFIG_WPS -DEAP_WSC

@@ -150,6 +150,11 @@ int eap_register_methods(void)
 		ret = eap_peer_eke_register();
 #endif /* EAP_EKE */
 
+#ifdef EAP_PPT
+	if (ret == 0)
+		ret = eap_peer_ppt_register();
+#endif /* EAP_PPT */
+
 #ifdef EAP_SERVER_IDENTITY
 	if (ret == 0)
 		ret = eap_server_identity_register();
