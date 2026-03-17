@@ -1397,3 +1397,95 @@ def test_eap_teapv2_client_cert(dev, apdev):
     eap_connect(dev[1], hapd, "TEAPV2", "user",
                 anonymous_identity="TEAPV2", password="password",
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
+
+# ---------------------------------------------------------------------------
+# EAP-PPT test cases (draft-ietf-emu-eap-ppt)
+#
+# EAP-PPT is an inner-only method (MUST run inside a server-authenticated
+# TLS tunnel).  The peer authenticates by presenting a Privacy Pass token
+# which is stored in the wpa_supplicant "password" field as a base64url
+# string.  The tests below use TEAP and EAP-TTLS as outer tunnels.
+# ---------------------------------------------------------------------------
+
+# Base64url-encoded test token used in all EAP-PPT tests.
+# Value: base64url("test-token") = "dGVzdC10b2tlbg"
+EAP_PPT_TEST_TOKEN = "dGVzdC10b2tlbg"
+
+
+def _int_ppt_server_params():
+    """Return hostapd params for an internal EAP server supporting EAP-PPT."""
+    params = int_eap_server_params()
+    # EAP-PPT configuration (stub values; a production server would set
+    # eap_ppt_issuer_name, eap_ppt_origin_info, eap_ppt_token_type).
+    return params
+
+
+def test_eap_teap_eap_ppt(dev, apdev):
+    """EAP-TEAP with inner EAP-PPT"""
+    check_eap_capa(dev[0], "TEAP")
+    check_eap_capa(dev[0], "PPT")
+    params = int_teap_server_params()
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAP", "user",
+                anonymous_identity="TEAP",
+                password=EAP_PPT_TEST_TOKEN,
+                ca_cert="auth_serv/ca.pem",
+                phase2="auth=PPT")
+    eap_reauth(dev[0], "TEAP")
+
+
+def test_eap_ttls_eap_ppt(dev, apdev):
+    """EAP-TTLS with inner EAP-PPT"""
+    check_eap_capa(dev[0], "TTLS")
+    check_eap_capa(dev[0], "PPT")
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TTLS", "user",
+                anonymous_identity="ttls",
+                password=EAP_PPT_TEST_TOKEN,
+                ca_cert="auth_serv/ca.pem",
+                phase2="autheap=PPT")
+    eap_reauth(dev[0], "TTLS")
+
+
+def test_eap_peap_eap_ppt(dev, apdev):
+    """EAP-PEAP with inner EAP-PPT"""
+    check_eap_capa(dev[0], "PEAP")
+    check_eap_capa(dev[0], "PPT")
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "PEAP", "user",
+                anonymous_identity="peap",
+                password=EAP_PPT_TEST_TOKEN,
+                ca_cert="auth_serv/ca.pem",
+                phase2="auth=PPT")
+    eap_reauth(dev[0], "PEAP")
+
+
+def test_eap_ppt_no_token(dev, apdev):
+    """EAP-PPT inside TEAP with no token configured (empty token response)"""
+    check_eap_capa(dev[0], "TEAP")
+    check_eap_capa(dev[0], "PPT")
+    params = int_teap_server_params()
+    hapd = hostapd.add_ap(apdev[0], params)
+    # No password → peer sends empty token → server should reject
+    eap_connect(dev[0], hapd, "TEAP", "user",
+                anonymous_identity="TEAP",
+                ca_cert="auth_serv/ca.pem",
+                phase2="auth=PPT",
+                expect_failure=True)
+
+
+def test_eap_ppt_reauth(dev, apdev):
+    """EAP-PPT inside EAP-TTLS reauthentication"""
+    check_eap_capa(dev[0], "TTLS")
+    check_eap_capa(dev[0], "PPT")
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TTLS", "user",
+                anonymous_identity="ttls",
+                password=EAP_PPT_TEST_TOKEN,
+                ca_cert="auth_serv/ca.pem",
+                phase2="autheap=PPT")
+    eap_reauth(dev[0], "TTLS")
+    eap_reauth(dev[0], "TTLS")
