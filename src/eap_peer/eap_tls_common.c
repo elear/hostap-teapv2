@@ -164,7 +164,8 @@ static int eap_tls_params_from_conf(struct eap_sm *sm,
 {
 	os_memset(params, 0, sizeof(*params));
 	if (sm->workaround && data->eap_type != EAP_TYPE_FAST &&
-	    data->eap_type != EAP_TYPE_TEAP) {
+	    data->eap_type != EAP_TYPE_TEAP &&
+	    data->eap_type != EAP_TYPE_TEAPV2) {
 		/*
 		 * Some deployed authentication servers seem to be unable to
 		 * handle the TLS Session Ticket extension (they are supposed
@@ -176,7 +177,8 @@ static int eap_tls_params_from_conf(struct eap_sm *sm,
 		 */
 		params->flags |= TLS_CONN_DISABLE_SESSION_TICKET;
 	}
-	if (data->eap_type == EAP_TYPE_TEAP) {
+	if (data->eap_type == EAP_TYPE_TEAP ||
+	    data->eap_type == EAP_TYPE_TEAPV2) {
 		/* RFC 7170 requires TLS v1.2 or newer to be used with TEAP */
 		params->flags |= TLS_CONN_DISABLE_TLSv1_0 |
 			TLS_CONN_DISABLE_TLSv1_1;
@@ -213,6 +215,10 @@ static int eap_tls_params_from_conf(struct eap_sm *sm,
 		eap_tls_params_from_conf1(params, config);
 		if (data->eap_type == EAP_TYPE_FAST)
 			params->flags |= TLS_CONN_EAP_FAST;
+	}
+	if (data->eap_type == EAP_TYPE_TEAPV2) {
+		params->flags |= TLS_CONN_DISABLE_TLSv1_2;
+		params->flags &= ~TLS_CONN_DISABLE_TLSv1_3;
 	}
 
 	/*

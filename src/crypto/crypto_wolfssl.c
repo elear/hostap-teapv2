@@ -3361,6 +3361,9 @@ int crypto_csr_set_name(struct crypto_csr *csr, enum crypto_csr_name type,
 	case CSR_NAME_SN:
 		dest = csr->req.c.subject.sur;
 		break;
+	case CSR_NAME_SERIAL_NUMBER:
+		LOG_INVALID_PARAMETERS();
+		return -1;
 	case CSR_NAME_C:
 		dest = csr->req.c.subject.country;
 		break;

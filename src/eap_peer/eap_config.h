@@ -493,6 +493,13 @@ struct eap_peer_config {
 	 * not need to be authenticated.
 	 */
 	char *phase1;
+	/**
+	 * teapv2_ignore_request_action_pkcs10 - Ignore TEAPv2 PKCS#10 CSR request
+	 *
+	 * 0 = process Request-Action for PKCS#10 (default)
+	 * 1 = ignore Request-Action for PKCS#10
+	 */
+	int teapv2_ignore_request_action_pkcs10;
 
 	/**
 	 * phase2 - Phase2 (inner authentication with TLS tunnel) parameters

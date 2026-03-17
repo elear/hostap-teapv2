@@ -872,6 +872,8 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 	os_free(conf->private_key2);
 	os_free(conf->private_key_passwd);
 	os_free(conf->private_key_passwd2);
+	os_free(conf->teapv2_pkcs7_cert);
+	os_free(conf->teapv2_pkcs7_key);
 	os_free(conf->check_cert_subject);
 	os_free(conf->ocsp_stapling_response);
 	os_free(conf->ocsp_stapling_response_multi);
@@ -881,6 +883,8 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 	os_free(conf->pac_opaque_encr_key);
 	os_free(conf->eap_fast_a_id);
 	os_free(conf->eap_fast_a_id_info);
+	os_free(conf->eap_teapv2_trusted_server_root);
+	os_free(conf->eap_teapv2_csrattrs);
 	os_free(conf->eap_sim_db);
 	os_free(conf->imsi_privacy_key);
 	os_free(conf->radius_server_clients);
