@@ -199,6 +199,8 @@ struct eap_teapv2_tlv_parse {
 	u8 *basic_auth_resp;
 	size_t basic_auth_resp_len;
 	u32 error_code;
+	const u8 *error_string;
+	size_t error_string_len;
 	u16 identity_type;
 	u8 *pkcs10;
 	size_t pkcs10_len;
@@ -230,7 +232,8 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 		       int tlv_type, u8 *pos, size_t len);
 const char * eap_teapv2_tlv_type_str(enum teapv2_tlv_types type);
 struct wpabuf * eap_teapv2_tlv_result(int status, int intermediate);
-struct wpabuf * eap_teapv2_tlv_error(enum teapv2_error_codes error);
+struct wpabuf * eap_teapv2_tlv_error(enum teapv2_error_codes error,
+				     const char *error_string);
 struct wpabuf * eap_teapv2_tlv_identity_type(enum teapv2_identity_types id);
 enum eap_type;
 

@@ -61,6 +61,7 @@ struct eap_teapv2_data {
 	bool pkcs7_success;
 	bool cb_required;
 	bool client_authenticated;
+	char *error_string;
 	struct wpabuf *csr_attrs;
 
 	struct wpabuf *pending_phase2_req;
@@ -133,8 +134,9 @@ static int eap_teapv2_store_blob(struct eap_sm *sm,
 }
 
 static void
-eap_teapv2_process_trusted_server_root(struct eap_sm *sm, const u8 *buf,
-				       size_t len)
+eap_teapv2_process_trusted_server_root(struct eap_sm *sm,
+				       struct eap_teapv2_data *data,
+				       const u8 *buf, size_t len)
 {
 	struct eap_peer_cert_config *cert_cfg;
 	u16 format;
@@ -153,6 +155,8 @@ eap_teapv2_process_trusted_server_root(struct eap_sm *sm, const u8 *buf,
 
 	cert_cfg = eap_teapv2_current_cert_config(sm);
 	if (!cert_cfg) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("No certificate configuration for Trusted-Server-Root TLV");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: No certificate configuration for Trusted-Server-Root TLV");
 		return;
@@ -162,6 +166,8 @@ eap_teapv2_process_trusted_server_root(struct eap_sm *sm, const u8 *buf,
 		if (eap_teapv2_store_blob(sm, cert_cfg, "trusted-root",
 					  cred, cred_len,
 					  &cert_cfg->ca_cert) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Failed to store Trusted-Server-Root");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to store Trusted-Server-Root");
 			return;
@@ -171,6 +177,8 @@ eap_teapv2_process_trusted_server_root(struct eap_sm *sm, const u8 *buf,
 	} else {
 		if (eap_teapv2_store_blob(sm, cert_cfg, "trusted-root",
 					  cred, cred_len, &ref) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Failed to store Trusted-Server-Root");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to store Trusted-Server-Root");
 			return;
@@ -264,6 +272,7 @@ static int eap_teapv2_set_csr_subject_from_cert(struct crypto_csr *csr,
 
 
 static int eap_teapv2_populate_csr_subject(struct eap_sm *sm,
+					   struct eap_teapv2_data *data,
 					   struct crypto_csr *csr,
 					   const struct wpabuf *own_cert)
 {
@@ -286,6 +295,8 @@ static int eap_teapv2_populate_csr_subject(struct eap_sm *sm,
 	if (eap_teapv2_set_csr_subject_from_identity(sm, csr) == 0)
 		return 0;
 
+	os_free(data->error_string);
+	data->error_string = os_strdup("Cannot populate CSR subject: no cert or identity available");
 	return -1;
 }
 
@@ -339,6 +350,7 @@ static bool eap_teapv2_csrattrs_hash_from_oid(const struct asn1_oid *oid,
 }
 
 static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
+				      struct eap_teapv2_data *data,
 				      const struct wpabuf *csr_attrs,
 				      bool *name_set,
 				      enum crypto_hash_alg *hash_alg)
@@ -359,6 +371,8 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 
 	if (asn1_get_sequence(pos, end - pos, &hdr, &seq_end) < 0 ||
 	    seq_end != end) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Invalid CSR Attributes DER encoding");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Invalid CSR Attributes DER");
 		return -1;
@@ -368,8 +382,11 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 	while (pos < seq_end) {
 		const u8 *attr_pos, *attr_end;
 
-		if (asn1_get_next(pos, seq_end - pos, &hdr) < 0)
+		if (asn1_get_next(pos, seq_end - pos, &hdr) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("ASN.1 parse error in CSR Attributes");
 			return -1;
+		}
 
 		if (hdr.class == ASN1_CLASS_UNIVERSAL &&
 		    hdr.tag == ASN1_TAG_OID) {
@@ -406,11 +423,16 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 		attr_pos = hdr.payload;
 		attr_end = hdr.payload + hdr.length;
 		if (asn1_get_oid(attr_pos, attr_end - attr_pos, &oid,
-				 &attr_pos) < 0)
+				 &attr_pos) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("ASN.1 parse error in CSR Attribute OID");
 			return -1;
+		}
 
 		if (asn1_get_next(attr_pos, attr_end - attr_pos, &set_hdr) < 0 ||
 		    !asn1_is_set(&set_hdr)) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("CSR Attributes missing SET OF values");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: CSR Attributes missing SET OF values");
 			return -1;
@@ -425,8 +447,11 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 
 		if (asn1_get_next(attr_pos,
 				  set_hdr.payload + set_hdr.length - attr_pos,
-				  &val_hdr) < 0)
+				  &val_hdr) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("ASN.1 parse error in CSR Attribute value");
 			return -1;
+		}
 
 		if (!asn1_is_string_type(&val_hdr)) {
 			wpa_printf(MSG_DEBUG,
@@ -469,11 +494,16 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 
 			if (supported) {
 				tmp = os_malloc(val_hdr.length + 1);
-				if (!tmp)
+				if (!tmp) {
+					os_free(data->error_string);
+					data->error_string = os_strdup("Memory allocation failure in CSR Attribute processing");
 					return -1;
+				}
 				os_memcpy(tmp, val_hdr.payload, val_hdr.length);
 				tmp[val_hdr.length] = '\0';
 				if (crypto_csr_set_name(csr, name, tmp) < 0) {
+					os_free(data->error_string);
+					data->error_string = os_strdup("Failed to set CSR subject name");
 					wpa_printf(MSG_INFO,
 						   "EAP-TEAPV2: Failed to set CSR subject name");
 					ret = -1;
@@ -492,6 +522,8 @@ static int eap_teapv2_apply_csr_attrs(struct crypto_csr *csr,
 				    csr, CSR_ATTR_CHALLENGE_PASSWORD,
 				    val_hdr.tag, val_hdr.payload,
 				    val_hdr.length) < 0) {
+				os_free(data->error_string);
+				data->error_string = os_strdup("Failed to set CSR challengePassword attribute");
 				wpa_printf(MSG_INFO,
 					   "EAP-TEAPV2: Failed to set CSR challengePassword");
 				ret = -1;
@@ -519,20 +551,28 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 
 	cert_cfg = eap_teapv2_current_cert_config(sm);
 	if (!cert_cfg) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("No certificate configuration for PKCS#10");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: No certificate configuration available for PKCS#10");
 		return NULL;
 	}
 
 	key = crypto_ec_key_gen(19);
+	os_free(data->error_string);
+	data->error_string = os_strdup("EC key generation failure");
 	if (!key)
 		goto fail;
 
 	priv = crypto_ec_key_get_ecprivate_key(key, true);
+	os_free(data->error_string);
+	data->error_string = os_strdup("Private key export failure");
 	if (!priv)
 		goto fail;
 
 	csr = crypto_csr_init();
+	os_free(data->error_string);
+	data->error_string = os_strdup("CSR init or set_ec_public_key failure");
 	if (!csr || crypto_csr_set_ec_public_key(csr, key))
 		goto fail;
 
@@ -541,13 +581,17 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 		wpa_hexdump_buf(MSG_MSGDUMP,
 				"EAP-TEAPV2: CSR Attributes (RFC 9908)",
 				data->csr_attrs);
-		if (eap_teapv2_apply_csr_attrs(csr, data->csr_attrs,
+		if (eap_teapv2_apply_csr_attrs(csr, data, data->csr_attrs,
 					       &name_set, &hash_alg) < 0)
+			os_free(data->error_string);
+			data->error_string = os_strdup("CSR attribute application failure");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to apply CSR Attributes");
 	}
 	if (!name_set) {
-		if (eap_teapv2_populate_csr_subject(sm, csr, own_cert) < 0) {
+		if (eap_teapv2_populate_csr_subject(sm, data, csr, own_cert) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("CSR subject population failure");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to set CSR subject from existing credentials");
 			goto fail;
@@ -559,6 +603,8 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	csr_der = crypto_csr_sign(csr, key, hash_alg);
 	if (!csr_der)
 		goto fail;
+	os_free(data->error_string);
+	data->error_string = os_strdup("CSR signing failure");
 	wpa_hexdump_buf(MSG_MSGDUMP, "EAP-TEAPV2: PKCS#10 CSR (DER)",
 			csr_der);
 	{
@@ -608,6 +654,8 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 	if (eap_teapv2_store_blob(sm, cert_cfg, purpose,
 				  wpabuf_head(priv), wpabuf_len(priv),
 				  &cert_cfg->private_key) < 0) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Private key blob storage failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to store generated private key");
 		goto fail;
@@ -619,6 +667,8 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 		goto fail;
 	eap_teapv2_put_tlv_buf(tlv, TEAPV2_TLV_PKCS10, csr_der);
 	data->pkcs10_requested = true;
+	os_free(data->error_string);
+	data->error_string = os_strdup("PKCS#10 output TLV allocation failure");
 	wpabuf_free(data->csr_attrs);
 	data->csr_attrs = NULL;
 
@@ -653,12 +703,16 @@ static int eap_teapv2_process_pkcs7(struct eap_sm *sm,
 
 	pem = crypto_pkcs7_get_certificates(src);
 	if (!pem) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("PKCS#7 bundle parse failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Could not parse PKCS#7 certificate bundle");
 		goto done;
 	}
 
 	if (!data->pkcs10_requested) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Unsolicited PKCS#7 received");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Ignoring unsolicited PKCS#7 certificate");
 		goto done;
@@ -668,6 +722,8 @@ static int eap_teapv2_process_pkcs7(struct eap_sm *sm,
 	if (eap_teapv2_store_blob(sm, cert_cfg, purpose,
 				  wpabuf_head(pem), wpabuf_len(pem),
 				  &cert_cfg->client_cert) < 0) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Certificate blob storage failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to store received PKCS#7 certificate");
 		goto done;
@@ -752,6 +808,8 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	data->peer_outer_tlvs = NULL;
 	wpabuf_free(data->csr_attrs);
 	data->csr_attrs = NULL;
+	os_free(data->error_string);
+	data->error_string = NULL;
 	forced_memzero(data->simck, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
@@ -788,6 +846,8 @@ static int eap_teapv2_derive_msk(struct eap_teapv2_data *data)
 				    data->key_data) < 0 ||
 	    eap_teapv2_derive_eap_emsk(data->tls_cs, data->simck,
 				     data->emsk) < 0)
+		os_free(data->error_string);
+		data->error_string = os_strdup("MSK/EMSK derivation failure");
 		return -1;
 	data->success = 1;
 	return 0;
@@ -797,6 +857,8 @@ static int eap_teapv2_derive_msk(struct eap_teapv2_data *data)
 static int eap_teapv2_derive_key_auth(struct eap_sm *sm,
 				    struct eap_teapv2_data *data)
 {
+	os_free(data->error_string);
+	data->error_string = os_strdup("TLS key export failure");
 	int res;
 
 	/* RFC 7170, Section 5.1 */
@@ -913,6 +975,8 @@ static int eap_teapv2_phase2_request(struct eap_sm *sm,
 	enum eap_type method;
 
 	if (len <= sizeof(struct eap_hdr)) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 EAP request too short");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: too short Phase 2 request (len=%lu)",
 			   (unsigned long) len);
@@ -922,6 +986,8 @@ static int eap_teapv2_phase2_request(struct eap_sm *sm,
 	method = *pos;
 	if (method == EAP_TYPE_EXPANDED) {
 		if (len < sizeof(struct eap_hdr) + 8) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Phase 2 expanded-header request too short");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Too short Phase 2 request (expanded header) (len=%lu)",
 				   (unsigned long) len);
@@ -955,6 +1021,8 @@ static int eap_teapv2_phase2_request(struct eap_sm *sm,
 
 	if ((!data->phase2_priv && eap_teapv2_init_phase2_method(sm, data) < 0) ||
 	    !data->phase2_method) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 method initialization failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to initialize Phase 2 EAP method %u:%u",
 			   vendor, method);
@@ -987,6 +1055,8 @@ static int eap_teapv2_phase2_request(struct eap_sm *sm,
 	    (config->pending_req_identity || config->pending_req_password ||
 	     config->pending_req_otp || config->pending_req_new_password ||
 	     config->pending_req_sim)) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Inner method returned no response");
 		wpabuf_free(data->pending_phase2_req);
 		data->pending_phase2_req = wpabuf_alloc_copy(hdr, len);
 	} else if (!(*resp))
@@ -1038,6 +1108,8 @@ static struct wpabuf * eap_teapv2_process_eap_payload_tlv(
 	struct wpabuf *resp = NULL;
 
 	if (eap_payload_tlv_len < sizeof(*hdr)) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("EAP Payload TLV too short");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: too short EAP Payload TLV (len=%lu)",
 			   (unsigned long) eap_payload_tlv_len);
@@ -1046,12 +1118,16 @@ static struct wpabuf * eap_teapv2_process_eap_payload_tlv(
 
 	hdr = (struct eap_hdr *) eap_payload_tlv;
 	if (be_to_host16(hdr->length) > eap_payload_tlv_len) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("EAP length field exceeds TLV buffer");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: EAP packet overflow in EAP Payload TLV");
 		return NULL;
 	}
 
 	if (hdr->code != EAP_CODE_REQUEST) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("EAP code is not Request");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Unexpected code=%d in Phase 2 EAP header",
 			   hdr->code);
@@ -1059,6 +1135,8 @@ static struct wpabuf * eap_teapv2_process_eap_payload_tlv(
 	}
 
 	if (eap_teapv2_phase2_request(sm, data, ret, hdr, &resp)) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 request processing failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Phase 2 Request processing failed");
 		return NULL;
@@ -1089,6 +1167,8 @@ static struct wpabuf * eap_teapv2_process_basic_auth_req(
 	password = eap_get_config_password(sm, &password_len);
 	if (!identity || !password ||
 	    identity_len > 255 || password_len > 255) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("No username or password configured, or over 255 bytes");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: No username/password suitable for Basic-Password-Auth");
 		return eap_teapv2_tlv_nak(0, TEAPV2_TLV_BASIC_PASSWORD_AUTH_REQ);
@@ -1140,6 +1220,8 @@ eap_teapv2_validate_crypto_binding(struct eap_teapv2_data *data,
 	    cb->received_version != data->received_version ||
 	    subtype != TEAPV2_CRYPTO_BINDING_SUBTYPE_REQUEST ||
 	    flags < 1 || flags > 3) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding: version, sub-type, or flags invalid");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Invalid Version/Flags/Sub-Type in Crypto-Binding TLV: Version %u Received Version %u Flags %u Sub-Type %u",
 			   cb->version, cb->received_version, flags, subtype);
@@ -1147,6 +1229,8 @@ eap_teapv2_validate_crypto_binding(struct eap_teapv2_data *data,
 	}
 
 	if (cb->nonce[EAP_TEAPV2_NONCE_LEN - 1] & 0x01) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding: nonce LSB set in request");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Invalid Crypto-Binding TLV Nonce in request");
 		return -1;
@@ -1176,6 +1260,8 @@ static int eap_teapv2_write_crypto_binding(
 	else if (cmk_msk)
 		flags = TEAPV2_CRYPTO_BINDING_MSK_CMAC;
 	else
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding: both cmk_msk and cmk_emsk are NULL");
 		return -1;
 	rbind->subtype = (flags << 4) | subtype;
 	os_memcpy(rbind->nonce, cb->nonce, sizeof(cb->nonce));
@@ -1187,11 +1273,15 @@ static int eap_teapv2_write_crypto_binding(
 	    eap_teapv2_compound_mac(data->tls_cs, rbind, data->server_outer_tlvs,
 				  data->peer_outer_tlvs, cmk_msk,
 				  rbind->msk_compound_mac) < 0)
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding: MSK Compound MAC calculation failure");
 		return -1;
 	if (cmk_emsk &&
 	    eap_teapv2_compound_mac(data->tls_cs, rbind, data->server_outer_tlvs,
 				  data->peer_outer_tlvs, cmk_emsk,
 				  rbind->emsk_compound_mac) < 0)
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding: EMSK Compound MAC calculation failure");
 		return -1;
 
 	wpa_printf(MSG_DEBUG,
@@ -1223,12 +1313,16 @@ static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data,
 		goto out; /* no MSK derived in Basic-Password-Auth */
 
 	if (!data->phase2_method || !data->phase2_priv) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 method/priv not available");
 		wpa_printf(MSG_INFO, "EAP-TEAPV2: Phase 2 method not available");
 		return -1;
 	}
 
 	if (data->phase2_method->isKeyAvailable &&
 	    !data->phase2_method->isKeyAvailable(sm, data->phase2_priv)) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 key material not available");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Phase 2 key material not available");
 		return -1;
@@ -1239,6 +1333,8 @@ static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data,
 		msk = data->phase2_method->getKey(sm, data->phase2_priv,
 						  &msk_len);
 		if (!msk) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("MSK fetch failure");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Could not fetch Phase 2 MSK");
 			return -1;
@@ -1291,8 +1387,11 @@ static int eap_teapv2_session_id(struct eap_teapv2_data *data)
 
 	os_free(data->session_id);
 	data->session_id = os_malloc(max_id_len);
-	if (!data->session_id)
+	if (!data->session_id) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("IMCK/session-id derivation failure");
 		return -1;
+	}
 
 	data->session_id[0] = EAP_TYPE_TEAPV2;
 	res = tls_get_tls_unique(data->ssl.conn, data->session_id + 1,
@@ -1300,6 +1399,8 @@ static int eap_teapv2_session_id(struct eap_teapv2_data *data)
 	if (res < 0 || (size_t) res >= max_id_len) {
 		os_free(data->session_id);
 		data->session_id = NULL;
+		os_free(data->error_string);
+		data->error_string = os_strdup("Session-Id tls_get_tls_unique failure");
 		wpa_printf(MSG_ERROR, "EAP-TEAPV2: Failed to derive Session-Id");
 		return -1;
 	}
@@ -1329,6 +1430,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 
 	if (eap_teapv2_validate_crypto_binding(data, cb) < 0 ||
 	    eap_teapv2_get_cmk(sm, data, cmk_msk, cmk_emsk) < 0)
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding validation or CMK derivation failure");
 		return NULL;
 
 	/* Validate received MSK/EMSK Compound MAC */
@@ -1354,6 +1457,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 			    "EAP-TEAPV2: Calculated MSK Compound MAC",
 			    msk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
 		if (res != 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Crypto-Binding: MSK Compound MAC mismatch");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: MSK Compound MAC did not match");
 			return NULL;
@@ -1376,6 +1481,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 			    "EAP-TEAPV2: Calculated EMSK Compound MAC",
 			    emsk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
 		if (res != 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Crypto-Binding: EMSK Compound MAC mismatch");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: EMSK Compound MAC did not match");
 			return NULL;
@@ -1384,6 +1491,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 
 	if (flags == TEAPV2_CRYPTO_BINDING_EMSK_CMAC &&
 	    !data->cmk_emsk_available) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Server sent only EMSK MAC but no local EMSK available");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Server included only EMSK Compound MAC, but no locally generated inner EAP EMSK to validate this");
 		return NULL;
@@ -1403,6 +1512,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 		os_memcpy(data->simck, data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
 		cmk_msk_ptr = cmk_msk;
 	} else {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding: neither MSK nor EMSK path selected");
 		return NULL;
 	}
 	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Selected S-IMCK[j]",
@@ -1410,8 +1521,11 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 
 	len = sizeof(struct teapv2_tlv_crypto_binding);
 	resp = wpabuf_alloc(len);
-	if (!resp)
+	if (!resp) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("MSK derivation failure");
 		return NULL;
+	}
 
 	if (data->phase2_success && eap_teapv2_derive_msk(data) < 0) {
 		wpa_printf(MSG_INFO, "EAP-TEAPV2: Failed to generate MSK");
@@ -1423,6 +1537,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 	}
 
 	if (data->phase2_success && eap_teapv2_session_id(data) < 0) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Session-Id derivation failure");
 		wpabuf_free(resp);
 		return NULL;
 	}
@@ -1431,6 +1547,8 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 	if (eap_teapv2_write_crypto_binding(
 		    data, (struct teapv2_tlv_crypto_binding *) pos,
 		    cb, cmk_msk_ptr, cmk_emsk_ptr) < 0) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Crypto-Binding write failure");
 		wpabuf_free(resp);
 		return NULL;
 	}
@@ -1520,13 +1638,15 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 
 	if (tlv.trusted_server_root)
 		eap_teapv2_process_trusted_server_root(
-			sm, tlv.trusted_server_root,
+			sm, data, tlv.trusted_server_root,
 			tlv.trusted_server_root_len);
 
 	if (tlv.result == TEAPV2_STATUS_FAILURE) {
 		/* Server indicated failure - respond similarly per
 		 * RFC 7170, 3.6.3. This authentication exchange cannot succeed
 		 * and will be terminated with a cleartext EAP Failure. */
+		os_free(data->error_string);
+		data->error_string = os_strdup("Server sent Result=Failure");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Server rejected authentication");
 		resp = eap_teapv2_tlv_result(TEAPV2_STATUS_FAILURE, 0);
@@ -1539,6 +1659,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	    tlv.iresult == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
 		/* Intermediate-Result TLV indicating success, but no
 		 * Crypto-Binding TLV */
+		os_free(data->error_string);
+		data->error_string = os_strdup("Intermediate-Result=Success with no Crypto-Binding");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Intermediate-Result TLV indicating success, but no Crypto-Binding TLV");
 		failed = 1;
@@ -1551,6 +1673,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	    !data->result_success_done &&
 	    tlv.result == TEAPV2_STATUS_SUCCESS && !tlv.crypto_binding) {
 		/* Result TLV indicating success, but no Crypto-Binding TLV */
+		os_free(data->error_string);
+		data->error_string = os_strdup("Intermediate-Result=Success with no Crypto-Binding");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Result TLV indicating success, but no Crypto-Binding TLV");
 		failed = 1;
@@ -1561,6 +1685,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	if (tlv.iresult != TEAPV2_STATUS_SUCCESS &&
 	    tlv.iresult != TEAPV2_STATUS_FAILURE &&
 	    data->inner_method_done) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Result=Success with no Crypto-Binding");
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Inner EAP method exchange completed, but no Intermediate-Result TLV included");
 		failed = 1;
@@ -1571,6 +1697,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	if (tlv.crypto_binding) {
 		if (tlv.iresult != TEAPV2_STATUS_SUCCESS &&
 		    tlv.result != TEAPV2_STATUS_SUCCESS) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Inner method completed with no Intermediate-Result TLV");
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Unexpected Crypto-Binding TLV without Result TLV or Intermediate-Result TLV indicating success");
 			failed = 1;
@@ -1616,6 +1744,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 						   &data->phase2_types,
 						   &data->num_phase2_types,
 						   sm->use_machine_cred) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Crypto-Binding TLV without Result or Intermediate-Result");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to update Phase 2 EAP types");
 			failed = 1;
@@ -1628,6 +1758,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		data->csr_attrs = wpabuf_alloc_copy(tlv.csr_attrs,
 						    tlv.csr_attrs_len);
 		if (!data->csr_attrs) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Phase 2 EAP type update failure");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to store CSR Attributes TLV");
 			failed = 1;
@@ -1640,9 +1772,13 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		struct eap_peer_config *config = eap_get_config(sm);
 
 		if (config && config->teapv2_ignore_request_action_pkcs10) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("CSR Attributes buffer allocation failure");
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Ignoring Request-Action for PKCS#10 CSR");
 		} else {
+			os_free(data->error_string);
+			data->error_string = os_strdup("PKCS#10 TLV build failure");
 			wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Generating PKCS#10 response");
 			tmp = eap_teapv2_build_pkcs10_tlv(sm, data);
 			if (!tmp) {
@@ -1658,6 +1794,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 
 	if (tlv.pkcs7) {
 		if (eap_teapv2_process_pkcs7(sm, data, tlv.pkcs7, tlv.pkcs7_len) < 0) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("PKCS#7 processing failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to store PKCS#7 certificate");
 		failed = 1;
@@ -1667,6 +1805,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		data->pkcs7_success = true;
 		if (eap_teapv2_derive_msk(data) < 0 ||
 		    eap_teapv2_session_id(data) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Key derivation failure after PKCS#7");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to derive keys after PKCS#7");
 			failed = 1;
@@ -1683,6 +1823,8 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 			failed = 1;
 		else if (eap_teapv2_derive_msk(data) < 0 ||
 			 	 eap_teapv2_session_id(data) < 0) {
+				os_free(data->error_string);
+				data->error_string = os_strdup("Inner EAP response processing failure");
 				wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to derive keys after basic auth");
 				failed = 1;
@@ -1728,7 +1870,7 @@ done:
 		resp = wpabuf_concat(tmp, resp);
 
 		if (error != 0) {
-			tmp = eap_teapv2_tlv_error(error);
+			tmp = eap_teapv2_tlv_error(error, data->error_string);
 			resp = wpabuf_concat(tmp, resp);
 		}
 
@@ -1743,8 +1885,11 @@ done:
 		tmp = eap_teapv2_tlv_result((!failed && data->phase2_success) ?
 					  TEAPV2_STATUS_SUCCESS :
 					  TEAPV2_STATUS_FAILURE, 1);
-		if (tlv.iresult == TEAPV2_STATUS_FAILURE)
+		if (tlv.iresult == TEAPV2_STATUS_FAILURE) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Key derivation failure after basic auth");
 			wpa_printf(MSG_ERROR, "TEAPV2: Intermediate status = FAIL");
+		}
 		resp = wpabuf_concat(tmp, resp);
 	}
 
@@ -1761,6 +1906,8 @@ done:
 		if (! data->cb_required ) {
 			if (eap_teapv2_derive_msk(data) < 0 ||
 					eap_teapv2_session_id(data) < 0) {
+					os_free(data->error_string);
+					data->error_string = os_strdup("Key derivation failure at final completion");
 					wpa_printf(MSG_INFO,
 					"EAP-TEAPV2: Failed to derive keys");
 					failed = 1;
@@ -1783,6 +1930,8 @@ send_resp:
 	if (eap_peer_tls_encrypt(sm, &data->ssl, EAP_TYPE_TEAPV2,
 				 data->teapv2_version, identifier,
 				 resp, out_data)) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 encryption failure");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Failed to encrypt a Phase 2 frame");
 	}
@@ -1828,6 +1977,8 @@ static int eap_teapv2_decrypt(struct eap_sm *sm, struct eap_teapv2_data *data,
 			data->on_tx_completion = 0;
 			ret->decision = DECISION_UNCOND_SUCC;
 		}
+		os_free(data->error_string);
+		data->error_string = os_strdup("Phase 2 TLS decryption failure");
 		return res;
 	}
 
@@ -1840,6 +1991,8 @@ continue_req:
 			in_decrypted);
 
 	if (wpabuf_len(in_decrypted) < 4) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("Decrypted phase 2 TLV frame too short");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Too short Phase 2 TLV frame (len=%lu)",
 			   (unsigned long) wpabuf_len(in_decrypted));
@@ -1871,6 +2024,8 @@ static int eap_teapv2_process_start(struct eap_sm *sm,
 		   data->received_version, data->teapv2_version);
 	if (data->received_version < 1) {
 		/* Version 1 was the first defined version, so reject 0 */
+		os_free(data->error_string);
+		data->error_string = os_strdup("Server sent unsupported TEAPv2 version 0");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Server used unknown TEAPV2 version %u",
 			   data->received_version);
@@ -1888,6 +2043,8 @@ static int eap_teapv2_process_start(struct eap_sm *sm,
 		u32 outer_tlv_len;
 
 		if (left < 4) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Not enough room for Outer TLV Length field");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Not enough room for the Outer TLV Length field");
 			return -1;
@@ -1898,6 +2055,8 @@ static int eap_teapv2_process_start(struct eap_sm *sm,
 		left -= 4;
 
 		if (outer_tlv_len > left) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Outer TLVs field truncated");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Truncated Outer TLVs field (Outer TLV Length: %u; remaining buffer: %u)",
 				   outer_tlv_len, (unsigned int) left);
@@ -1911,8 +2070,11 @@ static int eap_teapv2_process_start(struct eap_sm *sm,
 		wpabuf_free(data->server_outer_tlvs);
 		data->server_outer_tlvs = wpabuf_alloc_copy(outer_pos,
 							    outer_tlv_len);
-		if (!data->server_outer_tlvs)
+		if (!data->server_outer_tlvs) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Unexpected TLS data after Outer TLVs");
 			return -1;
+		}
 		left -= outer_tlv_len;
 		if (left > 0) {
 			wpa_hexdump(MSG_INFO,
@@ -1925,6 +2087,8 @@ static int eap_teapv2_process_start(struct eap_sm *sm,
 			u16 tlv_type, tlv_len;
 
 			if (outer_end - outer_pos < 4) {
+				os_free(data->error_string);
+				data->error_string = os_strdup("Outer TLV header truncated");
 				wpa_printf(MSG_INFO,
 					   "EAP-TEAPV2: Truncated Outer TLV header");
 				return -1;
@@ -1940,12 +2104,16 @@ static int eap_teapv2_process_start(struct eap_sm *sm,
 				   "EAP-TEAPV2: Outer TLV: Type=%u Length=%u",
 				   tlv_type, tlv_len);
 			if (outer_end - outer_pos < tlv_len) {
+				os_free(data->error_string);
+				data->error_string = os_strdup("Outer TLV body truncated");
 				wpa_printf(MSG_INFO,
 					   "EAP-TEAPV2: Truncated Outer TLV (Type %u)",
 					   tlv_type);
 				return -1;
 			}
 			if (tlv_type == TEAPV2_TLV_AUTHORITY_ID) {
+				os_free(data->error_string);
+				data->error_string = os_strdup("Multiple Authority-ID TLVs in Start message");
 				wpa_hexdump(MSG_DEBUG, "EAP-TEAPV2: Authority-ID",
 					    outer_pos, tlv_len);
 				if (a_id) {
@@ -2054,15 +2222,21 @@ static struct wpabuf * eap_teapv2_process(struct eap_sm *sm, void *priv,
 
 	pos = eap_peer_tls_process_init(sm, &data->ssl, EAP_TYPE_TEAPV2, ret,
 					reqData, &left, &flags);
-	if (!pos)
+	if (!pos) {
+		os_free(data->error_string);
+		data->error_string = os_strdup("TLS peer process init failure");
 		return NULL;
+	}
 
 	req = wpabuf_head(reqData);
 	id = req->identifier;
 
 	if (flags & EAP_TLS_FLAGS_START) {
-		if (eap_teapv2_process_start(sm, data, flags, pos, left) < 0)
+		if (eap_teapv2_process_start(sm, data, flags, pos, left) < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("Start message processing failure");
 			return NULL;
+		}
 
 		/* Outer TLVs are not used in further packet processing and
 		 * there cannot be TLS Data in this TEAPV2/Start message, so
@@ -2073,6 +2247,8 @@ static struct wpabuf * eap_teapv2_process(struct eap_sm *sm, void *priv,
 		/* TODO: RFC 7170, Section 4.3.1 indicates that the unexpected
 		 * Outer TLVs MUST be ignored instead of ignoring the full
 		 * message. */
+		os_free(data->error_string);
+		data->error_string = os_strdup("Outer TLVs present in non-Start message");
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Outer TLVs present in non-Start message -> ignore message");
 		return NULL;
@@ -2081,6 +2257,8 @@ static struct wpabuf * eap_teapv2_process(struct eap_sm *sm, void *priv,
 	wpabuf_set(&msg, pos, left);
 
 	resp = NULL;
+	os_free(data->error_string);
+	data->error_string = os_strdup("Phase 2 decryption failure");
 	if (tls_connection_established(sm->ssl_ctx, data->ssl.conn) &&
 	    !data->resuming) {
 		/* Process tunneled (encrypted) phase 2 data. */
@@ -2115,6 +2293,8 @@ static struct wpabuf * eap_teapv2_process(struct eap_sm *sm, void *priv,
 				ret->methodState = METHOD_DONE;
 				ret->decision = DECISION_FAIL;
 				sm->waiting_ext_cert_check = 0;
+				os_free(data->error_string);
+				data->error_string = os_strdup("External certificate check failed");
 				return NULL;
 			}
 
@@ -2129,6 +2309,8 @@ static struct wpabuf * eap_teapv2_process(struct eap_sm *sm, void *priv,
 						  data->teapv2_version, id, &msg,
 						  &resp);
 		if (res < 0) {
+			os_free(data->error_string);
+			data->error_string = os_strdup("TLS handshake helper failure");
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: TLS processing failed");
 			ret->methodState = METHOD_DONE;
@@ -2159,6 +2341,8 @@ static struct wpabuf * eap_teapv2_process(struct eap_sm *sm, void *priv,
 					   "EAP-TEAPV2: Could not derive keys");
 				ret->methodState = METHOD_DONE;
 				ret->decision = DECISION_FAIL;
+				os_free(data->error_string);
+				data->error_string = os_strdup("Key derivation failure after TLS handshake");
 				wpabuf_free(resp);
 				return NULL;
 			}

@@ -1,0 +1,93 @@
+# Dockerfile for building hostapd and wpa_supplicant using the hwsim example
+# configs (tests/hwsim/example-hostapd.config and
+# tests/hwsim/example-wpa_supplicant.config).
+#
+# Build:
+#   docker build -f Dockerfile.hwsim -t hostap-hwsim .
+#
+# Run interactive shell:
+#   docker run -it --rm hostap-hwsim bash
+#
+# Binaries are installed to /usr/local/sbin/:
+#   /usr/local/sbin/hostapd
+#   /usr/local/sbin/hostapd_cli
+#   /usr/local/sbin/wpa_supplicant
+#   /usr/local/sbin/wpa_cli
+
+FROM ubuntu:24.04
+
+LABEL description="hostapd + wpa_supplicant built from tests/hwsim example configs"
+
+# Avoid interactive prompts during package installation.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ---------------------------------------------------------------------------
+# 1. Install build dependencies
+# ---------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core build tools
+    build-essential \
+    pkg-config \
+    git \
+    # OpenSSL — CONFIG_TLS=openssl
+    libssl-dev \
+    # libnl3 — CONFIG_DRIVER_NL80211=y, CONFIG_LIBNL32=y, CONFIG_LIBNL3_ROUTE=y
+    libnl-3-dev \
+    libnl-genl-3-dev \
+    libnl-route-3-dev \
+    # D-Bus — CONFIG_CTRL_IFACE_DBUS_NEW=y (wpa_supplicant)
+    libdbus-1-dev \
+    # SQLite — CONFIG_SQLITE=y (hostapd EAP-SIM db, HS20)
+    libsqlite3-dev \
+    # BFD/libiberty — CONFIG_WPA_TRACE_BFD=y (both)
+    binutils-dev \
+    libiberty-dev \
+    zlib1g-dev \
+    # libmnl — CONFIG_DRIVER_MACSEC_LINUX=y (both)
+    libmnl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# 2. Copy the source tree into the image
+# ---------------------------------------------------------------------------
+WORKDIR /build/hostap
+COPY . .
+
+# ---------------------------------------------------------------------------
+# 3. Build hostapd
+# ---------------------------------------------------------------------------
+RUN cp tests/hwsim/example-hostapd.config hostapd/.config \
+    && make -C hostapd -j"$(nproc)" \
+    && make -C hostapd install DESTDIR=/install
+
+# ---------------------------------------------------------------------------
+# 4. Build wpa_supplicant
+# ---------------------------------------------------------------------------
+RUN cp tests/hwsim/example-wpa_supplicant.config wpa_supplicant/.config \
+    && make -C wpa_supplicant -j"$(nproc)" \
+    && make -C wpa_supplicant install DESTDIR=/install
+
+# ---------------------------------------------------------------------------
+# 5. Assemble a minimal runtime image
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    libnl-3-200 \
+    libnl-genl-3-200 \
+    libnl-route-3-200 \
+    libdbus-1-3 \
+    libsqlite3-0 \
+    libmnl0 \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=0 /install/usr/local/bin/hostapd      /usr/local/sbin/hostapd
+COPY --from=0 /install/usr/local/bin/hostapd_cli  /usr/local/sbin/hostapd_cli
+COPY --from=0 /install/usr/local/sbin/wpa_supplicant /usr/local/sbin/wpa_supplicant
+COPY --from=0 /install/usr/local/sbin/wpa_cli        /usr/local/sbin/wpa_cli
+
+CMD ["/bin/bash"]

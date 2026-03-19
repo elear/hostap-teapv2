@@ -450,7 +450,21 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			break;
 		}
 		tlv->error_code = WPA_GET_BE32(pos);
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Error: %u", tlv->error_code);
+		if (len > 6) {
+			u16 slen = WPA_GET_BE16(pos + 4);
+
+			if (slen > len - 6)
+				slen = len - 6;
+			tlv->error_string = pos + 6;
+			tlv->error_string_len = slen;
+			wpa_printf(MSG_DEBUG,
+				   "EAP-TEAPV2: Error: %u (%.*s)",
+				   tlv->error_code,
+				   (int) slen, (const char *) tlv->error_string);
+		} else {
+			wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Error: %u",
+				   tlv->error_code);
+		}
 		break;
 	case TEAPV2_TLV_REQUEST_ACTION:
 		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Request-Action TLV",
@@ -698,18 +712,28 @@ struct wpabuf * eap_teapv2_tlv_result(int status, int intermediate)
 }
 
 
-struct wpabuf * eap_teapv2_tlv_error(enum teapv2_error_codes error)
+struct wpabuf * eap_teapv2_tlv_error(enum teapv2_error_codes error,
+				     const char *error_string)
 {
 	struct wpabuf *buf;
+	size_t slen = error_string ? os_strlen(error_string) : 0;
 
-	buf = wpabuf_alloc(4 + 4);
+	/* 4-byte TLV header + 4-byte error code + optional 2-byte slen + string */
+	buf = wpabuf_alloc(4 + 4 + (slen ? 2 + slen : 0));
 	if (!buf)
 		return NULL;
-	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Add Error TLV(Error Code=%d)",
-		   error);
+	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Add Error TLV(Error Code=%d%s%s%s)",
+		   error,
+		   slen ? " " : "",
+		   slen ? error_string : "",
+		   "");
 	wpabuf_put_be16(buf, TEAPV2_TLV_MANDATORY | TEAPV2_TLV_ERROR);
-	wpabuf_put_be16(buf, 4);
+	wpabuf_put_be16(buf, 4 + (slen ? 2 + slen : 0));
 	wpabuf_put_be32(buf, error);
+	if (slen) {
+		wpabuf_put_be16(buf, slen);
+		wpabuf_put_data(buf, error_string, slen);
+	}
 	return buf;
 }
 
