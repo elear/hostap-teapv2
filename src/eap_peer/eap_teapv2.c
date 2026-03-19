@@ -582,11 +582,12 @@ eap_teapv2_build_pkcs10_tlv(struct eap_sm *sm, struct eap_teapv2_data *data)
 				"EAP-TEAPV2: CSR Attributes (RFC 9908)",
 				data->csr_attrs);
 		if (eap_teapv2_apply_csr_attrs(csr, data, data->csr_attrs,
-					       &name_set, &hash_alg) < 0)
+					       &name_set, &hash_alg) < 0) {
 			os_free(data->error_string);
 			data->error_string = os_strdup("CSR attribute application failure");
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to apply CSR Attributes");
+		}
 	}
 	if (!name_set) {
 		if (eap_teapv2_populate_csr_subject(sm, data, csr, own_cert) < 0) {
@@ -845,10 +846,11 @@ static int eap_teapv2_derive_msk(struct eap_teapv2_data *data)
 	if (eap_teapv2_derive_eap_msk(data->tls_cs, data->simck,
 				    data->key_data) < 0 ||
 	    eap_teapv2_derive_eap_emsk(data->tls_cs, data->simck,
-				     data->emsk) < 0)
+				     data->emsk) < 0) {
 		os_free(data->error_string);
 		data->error_string = os_strdup("MSK/EMSK derivation failure");
 		return -1;
+	}
 	data->success = 1;
 	return 0;
 }
@@ -1259,10 +1261,11 @@ static int eap_teapv2_write_crypto_binding(
 		flags = TEAPV2_CRYPTO_BINDING_EMSK_CMAC;
 	else if (cmk_msk)
 		flags = TEAPV2_CRYPTO_BINDING_MSK_CMAC;
-	else
+	else {
 		os_free(data->error_string);
 		data->error_string = os_strdup("Crypto-Binding: both cmk_msk and cmk_emsk are NULL");
 		return -1;
+	}
 	rbind->subtype = (flags << 4) | subtype;
 	os_memcpy(rbind->nonce, cb->nonce, sizeof(cb->nonce));
 	inc_byte_array(rbind->nonce, sizeof(rbind->nonce));
@@ -1272,17 +1275,19 @@ static int eap_teapv2_write_crypto_binding(
 	if (cmk_msk &&
 	    eap_teapv2_compound_mac(data->tls_cs, rbind, data->server_outer_tlvs,
 				  data->peer_outer_tlvs, cmk_msk,
-				  rbind->msk_compound_mac) < 0)
+				  rbind->msk_compound_mac) < 0) {
 		os_free(data->error_string);
 		data->error_string = os_strdup("Crypto-Binding: MSK Compound MAC calculation failure");
 		return -1;
+	}
 	if (cmk_emsk &&
 	    eap_teapv2_compound_mac(data->tls_cs, rbind, data->server_outer_tlvs,
 				  data->peer_outer_tlvs, cmk_emsk,
-				  rbind->emsk_compound_mac) < 0)
+				  rbind->emsk_compound_mac) < 0) {
 		os_free(data->error_string);
 		data->error_string = os_strdup("Crypto-Binding: EMSK Compound MAC calculation failure");
 		return -1;
+	}
 
 	wpa_printf(MSG_DEBUG,
 		   "EAP-TEAPV2: Reply Crypto-Binding TLV: Version %u Received Version %u Flags %u SubType %u",
@@ -1429,10 +1434,11 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 	bool server_msk, server_emsk;
 
 	if (eap_teapv2_validate_crypto_binding(data, cb) < 0 ||
-	    eap_teapv2_get_cmk(sm, data, cmk_msk, cmk_emsk) < 0)
+	    eap_teapv2_get_cmk(sm, data, cmk_msk, cmk_emsk) < 0) {
 		os_free(data->error_string);
 		data->error_string = os_strdup("Crypto-Binding validation or CMK derivation failure");
 		return NULL;
+	}
 
 	/* Validate received MSK/EMSK Compound MAC */
 	flags = cb->subtype >> 4;
