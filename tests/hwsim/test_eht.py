@@ -161,7 +161,7 @@ def test_prefer_eht_20(dev, apdev):
       raise Exception("Unexpected BSS1 est_throughput: " + est)
 
 def start_eht_sae_ap(apdev, ml=False, transition_mode=False,
-                     anti_clogging_token=False):
+                     anti_clogging_token=False, require_eht=False):
     params = hostapd.wpa2_params(ssid="eht", passphrase="12345678")
     params["ieee80211ax"] = "1"
     params["ieee80211be"] = "1"
@@ -178,6 +178,8 @@ def start_eht_sae_ap(apdev, ml=False, transition_mode=False,
     if ml:
         ml_elem = "ff0d6b" + "3001" + "0a" + "021122334455" + "01" + "00" + "00"
         params['vendor_elements'] = ml_elem
+    if require_eht:
+        params['require_eht'] = '1'
     try:
         hapd = hostapd.add_ap(apdev, params)
     except Exception as e:
@@ -198,6 +200,36 @@ def test_eht_sae(dev, apdev):
                        ieee80211w="2", beacon_prot="1",
                        pairwise="GCMP-256", group="GCMP-256",
                        group_mgmt="BIP-GMAC-256", scan_freq="2412")
+    finally:
+        dev[0].set("sae_groups", "")
+        dev[0].set("sae_pwe", "0")
+
+def test_eht_sae_require_eht(dev, apdev):
+    """EHT AP requiring EHT for association"""
+    check_sae_capab(dev[0])
+
+    hapd = start_eht_sae_ap(apdev[0], require_eht=True)
+    try:
+        dev[0].set("sae_groups", "20")
+        dev[0].set("sae_pwe", "2")
+        dev[0].connect("eht", key_mgmt="SAE-EXT-KEY", psk="12345678",
+                       ieee80211w="2", beacon_prot="1",
+                       pairwise="GCMP-256", group="GCMP-256",
+                       group_mgmt="BIP-GMAC-256", scan_freq="2412")
+        dev[0].request("REMOVE_NETWORK all")
+        dev[0].wait_disconnected()
+
+        dev[0].connect("eht", key_mgmt="SAE-EXT-KEY", psk="12345678",
+                       ieee80211w="2", beacon_prot="1",
+                       pairwise="GCMP-256", group="GCMP-256",
+                       group_mgmt="BIP-GMAC-256", scan_freq="2412",
+                       disable_eht="1", wait_connect=False)
+        ev = dev[0].wait_event(['CTRL-EVENT-ASSOC-REJECT'])
+        dev[0].request("DISCONNECT")
+        if not ev:
+            raise Exception('Rejection not found')
+        if "status_code=135" not in ev:
+            raise Exception("Unexpected association rejection status: " + ev)
     finally:
         dev[0].set("sae_groups", "")
         dev[0].set("sae_pwe", "0")
@@ -1585,7 +1617,7 @@ def _6ghz_op_class_to_bw(op):
         137: "320",
     }.get(op, "20")
 
-def _test_eht_6ghz(dev, apdev, channel, op_class, ccfs1):
+def _test_eht_6ghz(dev, apdev, channel, op_class, ccfs1, stop=True):
     check_sae_capab(dev[0])
 
     # CA enables 320 MHz channels without NO-IR restriction
@@ -1599,7 +1631,16 @@ def _test_eht_6ghz(dev, apdev, channel, op_class, ccfs1):
         params["ieee80211be"] = "1"
         params["channel"] = str(channel)
         params["op_class"] = str(op_class)
-        params["he_oper_centr_freq_seg0_idx"] = str(ccfs1)
+
+        if op_class == 137:
+            if ccfs1 > channel:
+                he_ccfs1 = ccfs1 - 16
+            else:
+                he_ccfs1 = ccfs1 + 16
+            params["he_oper_centr_freq_seg0_idx"] = str(he_ccfs1)
+        else:
+            params["he_oper_centr_freq_seg0_idx"] = str(ccfs1)
+
         params["eht_oper_centr_freq_seg0_idx"] = str(ccfs1)
         params["country_code"] = "CA"
 
@@ -1636,14 +1677,18 @@ def _test_eht_6ghz(dev, apdev, channel, op_class, ccfs1):
         if op_class not in supp_op_classes:
             raise Exception("STA did not indicate support for opclass %d" % op_class)
         hwsim_utils.test_connectivity(dev[0], hapd)
-        dev[0].request("DISCONNECT")
-        dev[0].wait_disconnected()
-        hapd.wait_sta_disconnect()
-        hapd.disable()
+        if stop:
+            dev[0].request("DISCONNECT")
+            dev[0].wait_disconnected()
+            hapd.wait_sta_disconnect()
+            hapd.disable()
+        else:
+            return hapd
     finally:
-        dev[0].set("sae_pwe", "0")
-        dev[0].cmd_execute(['iw', 'reg', 'set', '00'])
-        wait_regdom_changes(dev[0])
+        if stop:
+            dev[0].set("sae_pwe", "0")
+            dev[0].cmd_execute(['iw', 'reg', 'set', '00'])
+            wait_regdom_changes(dev[0])
 
 def test_eht_6ghz_20mhz(dev, apdev):
     """EHT with 20 MHz channel width on 6 GHz"""
@@ -1672,6 +1717,41 @@ def test_eht_6ghz_320mhz_2(dev, apdev):
 def test_eht_6ghz_320mhz_3(dev, apdev):
     """EHT with 320 MHz channel width on 6 GHz center 31 primary 37"""
     _test_eht_6ghz(dev, apdev, 37, 137, 31)
+
+def test_eht_6ghz_320mhz_cs(dev, apdev):
+    """EHT with 320 MHz channel width on 6 GHz and CSA"""
+    try:
+        hapd = _test_eht_6ghz(dev, apdev, 5, 137, 31, stop=False)
+
+        if "FAIL" in hapd.request("CHAN_SWITCH 8 6135 blocktx he eht bandwidth=320 center_freq1=6265"):
+            raise Exception("CHAN_SWITCH failed")
+
+        ev = hapd.wait_event(["CTRL-EVENT-CHANNEL-SWITCH"], timeout=5)
+        if ev is None:
+            raise Exception("Channel switch event not received (AP)")
+        if "freq=6135" not in ev or \
+           "ch_width=320 MHz" not in ev or \
+           "cf1=6265" not in ev:
+            raise Exception("Unexpected event contents (AP): " + ev)
+
+        ev = dev[0].wait_event(["CTRL-EVENT-CHANNEL-SWITCH"], timeout=5)
+        if ev is None:
+            raise Exception("Channel switch event not received (STA)")
+        if "freq=6135" not in ev or \
+           "ch_width=320 MHz" not in ev or \
+           "cf1=6265" not in ev:
+            raise Exception("Unexpected event contents (STA): " + ev)
+
+        hwsim_utils.test_connectivity(dev[0], hapd)
+
+        dev[0].request("DISCONNECT")
+        dev[0].wait_disconnected()
+        hapd.wait_sta_disconnect()
+        hapd.disable()
+    finally:
+        dev[0].set("sae_pwe", "0")
+        dev[0].cmd_execute(['iw', 'reg', 'set', '00'])
+        wait_regdom_changes(dev[0])
 
 def check_anqp(dev, bssid):
     if "OK" not in dev.request("ANQP_GET " + bssid + " 258"):

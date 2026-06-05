@@ -19,6 +19,7 @@
 #include "ieee802_11_defs.h"
 #include "ieee802_11_common.h"
 #include "defs.h"
+#include "common/nan_defs.h"
 #include "wpa_common.h"
 
 
@@ -487,6 +488,8 @@ int wpa_eapol_key_mic(const u8 *key, size_t key_len, int akmp,
  * @ptk: Buffer for pairwise transient key
  * @akmp: Negotiated AKM
  * @cipher: Negotiated pairwise cipher
+ * @z: Additional context data
+ * @z_len: Length of additional context data
  * @kdk_len: The length in octets that should be derived for KDK
  * Returns: 0 on success, -1 on failure
  *
@@ -497,7 +500,9 @@ int wpa_eapol_key_mic(const u8 *key, size_t key_len, int akmp,
  *             [ || Z.x ])
  *
  * The optional Z.x component is used only with DPP and that part is not defined
- * in IEEE 802.11.
+ * in IEEE 802.11. The additional context data is also used to carry the DHss
+ * (Diffie-Hellman shared secret) when IEEE 802.1X authentication in
+ * Authentication frames is  used.
  */
 int wpa_pmk_to_ptk(const u8 *pmk, size_t pmk_len, const char *label,
 		   const u8 *addr1, const u8 *addr2,
@@ -1554,8 +1559,9 @@ void wpa_ft_parse_ies_free(struct wpa_ft_ies *parse)
  */
 static bool pasn_use_sha384(int akmp, int cipher)
 {
-	return (akmp == WPA_KEY_MGMT_PASN && (cipher == WPA_CIPHER_CCMP_256 ||
-					      cipher == WPA_CIPHER_GCMP_256)) ||
+	return ((akmp == WPA_KEY_MGMT_PASN || akmp == WPA_KEY_MGMT_EPPKE) &&
+		(cipher == WPA_CIPHER_CCMP_256 ||
+		 cipher == WPA_CIPHER_GCMP_256)) ||
 		wpa_key_mgmt_sha384(akmp);
 }
 
@@ -1826,6 +1832,113 @@ int wpa_ltf_keyseed(struct wpa_ptk *ptk, int akmp, int cipher)
 
 	return 0;
 }
+
+
+#ifdef CONFIG_IEEE8021X_AUTH
+
+int wpa_auth_802_1x_pmk_to_ptk(const u8 *pmk, size_t pmk_len, const u8 *spa,
+			       const u8 *aa, const u8 *snonce, const u8 *anonce,
+			       int akmp, int cipher, const u8 *dhss,
+			       size_t dhss_len, struct wpa_ptk *ptk,
+			       size_t kdk_len)
+{
+	return wpa_pmk_to_ptk(pmk, pmk_len, "Pairwise key expansion",
+			      spa, aa, snonce, anonce, ptk, akmp,
+			      cipher, dhss, dhss_len, kdk_len);
+}
+
+
+/**
+ * wpa_auth_8021x_mic - Calculate IEEE 802.1X in Authentication frames  MIC
+ * @akmp: Negotiated key management protocol
+ * @kck: The key confirmation key from 802.1X exchange
+ * @kck_len: KCK length in octets
+ * @addr1: Authenticator address
+ * @addr2: Supplicant address
+ * @data: This should hold the RSNE + RSNXE.
+ *	For a MIC included by the AP with EAP-Success and the second
+ *	Authentication frame if a PMKSA was identified via a PMKID included in
+ *	the first Authentication frame, this holds the Beacon frame RSNE+RSNXE.
+ *	For a MIC included by the non-AP STA in the (Re)Association Request
+ *	frame, this holds the RSNE and RSNXE sent by the non-AP STA.
+ * @data_len: The length of data
+ * @frame: For a MIC included by the AP in EAP-Success and the second
+ *	Authentication frame if a PMKSA was identified via a PMKID included in
+ *	the first Authentication frame, this holds the body of the
+ *	Authentication frame including the MIC element with the octets in the
+ *	MIC field of the MIC element set to 0, else NULL
+ * @frame_len: The length of frame
+ * @mic: Buffer to hold the MIC on success. Must be large enough to handle the
+ *	maximal MIC length.
+ * Returns: 0 on success, -1 on failure
+ *
+ * HMAC-HASH (PTK-KCK, AA || SPA || RSNE || RSNXE || Frame Data)
+ */
+int wpa_auth_8021x_mic(int akmp, const u8 *kck, size_t kck_len, const u8 *addr1,
+		       const u8 *addr2, const u8 *data, size_t data_len,
+		       const u8 *frame, size_t frame_len, u8 *mic)
+{
+	size_t mic_len;
+	u8 *buf;
+	int ret = -1;
+	size_t buf_len = 2 * ETH_ALEN + data_len + frame_len;
+
+	if (!kck) {
+		wpa_printf(MSG_INFO, "802.1X: No KCK for MIC calculation");
+		return -1;
+	}
+
+	if (!data || !data_len) {
+		wpa_printf(MSG_INFO,
+			   "802.1X: Invalid data for MIC calculation");
+		return -1;
+	}
+
+	buf = os_zalloc(buf_len);
+	if (!buf)
+		return -1;
+
+	wpa_printf(MSG_DEBUG, "802.1X MIC calculation");
+	wpa_printf(MSG_DEBUG, "addr1: " MACSTR, MAC2STR(addr1));
+	wpa_printf(MSG_DEBUG, "addr2: " MACSTR, MAC2STR(addr2));
+
+	os_memcpy(buf, addr1, ETH_ALEN);
+	os_memcpy(buf + ETH_ALEN, addr2, ETH_ALEN);
+
+	wpa_hexdump_key(MSG_DEBUG, "MIC: data", data, data_len);
+	os_memcpy(buf + 2 * ETH_ALEN, data, data_len);
+
+	wpa_hexdump_key(MSG_DEBUG, "MIC: KCK", kck, kck_len);
+
+	if (frame) {
+		wpa_hexdump_key(MSG_MSGDUMP, "802.1X: MIC: frame",
+				frame, frame_len);
+		os_memcpy(buf + 2 * ETH_ALEN + data_len, frame, frame_len);
+	}
+
+	wpa_hexdump_key(MSG_DEBUG, "MIC: buf", buf, buf_len);
+	if (wpa_key_mgmt_sha384(akmp)) {
+		wpa_printf(MSG_DEBUG, "MIC: HMAC-SHA384");
+		mic_len = 24;
+
+		if (hmac_sha384(kck, kck_len, buf, buf_len, mic) < 0)
+			goto out;
+	} else {
+		wpa_printf(MSG_DEBUG, "MIC: HMAC-SHA256");
+		mic_len = 16;
+
+		if (hmac_sha256(kck, kck_len, buf, buf_len, mic) < 0)
+			goto out;
+	}
+
+	wpa_hexdump_key(MSG_DEBUG, "802.1X: Calculated MIC", mic, mic_len);
+	ret = 0;
+out:
+	bin_clear_free(buf, buf_len);
+	return ret;
+}
+
+#endif /* CONFIG_IEEE8021X_AUTH */
 
 
 /**
@@ -3119,6 +3232,38 @@ int wpa_compare_rsn_ie(int ft_initial_assoc,
 }
 
 
+/**
+ * wpa_compare_rsn_ie_params - Compare RSN IE parameters
+ * @rsne1: Pointer to first RSNE (with element ID and length)
+ * @rsne1_len: Length of the first RSNE
+ * @rsnee2: Pointer to second RSNE (with element ID and length)
+ * @rsne2_len: Length of the second RSNE
+ * Returns: 0 if parameters match, -1 otherwise
+ *
+ * Compare the security parameters (proto, ciphers, key_mgmt)
+ * of two RSN IEs.
+ */
+int wpa_compare_rsne_params(const u8 *rsne1, size_t rsne1_len,
+			    const u8 *rsne2, size_t rsne2_len)
+{
+	struct wpa_ie_data rsn1, rsn2;
+
+	if (!rsne1 || !rsne2)
+		return -1;
+
+	if (wpa_parse_wpa_ie_rsn(rsne1, rsne1_len, &rsn1) < 0 ||
+	    wpa_parse_wpa_ie_rsn(rsne2, rsne2_len, &rsn2) < 0)
+		return -1;
+
+	if (rsn1.proto == rsn2.proto &&
+	    rsn1.pairwise_cipher == rsn2.pairwise_cipher &&
+	    rsn1.key_mgmt == rsn2.key_mgmt)
+		return 0;
+
+	return -1;
+}
+
+
 int wpa_insert_pmkid(u8 *ies, size_t *ies_len, const u8 *pmkid, bool replace)
 {
 	u8 *start, *end, *rpos, *rend;
@@ -3899,6 +4044,27 @@ static int wpa_parse_generic(const u8 *pos, struct wpa_eapol_ie_parse *ie)
 		return 0;
 	}
 
+#if defined(CONFIG_NAN) || defined(CONFIG_PASN)
+	if (left >= sizeof(struct nan_nik_kde) &&
+	    selector == NAN_KEY_DATA_NIK) {
+		ie->nan_nik = p;
+		ie->nan_nik_len = left;
+		wpa_hexdump_key(MSG_DEBUG, "RSN: NAN NIK KDE in EAPOL-Key",
+				ie->nan_nik, ie->nan_nik_len);
+		return 0;
+	}
+
+	if (left >= sizeof(struct nan_key_lifetime_kde) &&
+	    selector == NAN_KEY_DATA_LIFETIME) {
+		ie->nan_key_lifetime = p;
+		ie->nan_key_lifetime_len = left;
+		wpa_hexdump(MSG_DEBUG,
+			    "RSN: NAN Key Lifetime KDE in EAPOL-Key",
+			    ie->nan_key_lifetime, ie->nan_key_lifetime_len);
+		return 0;
+	}
+#endif /* CONFIG_NAN || CONFIG_PASN */
+
 	return 2;
 }
 
@@ -4142,6 +4308,13 @@ int wpa_pasn_add_rsne(struct wpabuf *buf, const u8 *pmkid, int akmp, int cipher)
 	case WPA_KEY_MGMT_PASN:
 		RSN_SELECTOR_PUT(pos, RSN_AUTH_KEY_MGMT_PASN);
 		break;
+#ifdef CONFIG_ENC_ASSOC
+	case WPA_KEY_MGMT_EPPKE:
+		/* EPPKE without base AKM: EPPKE AKMP is used as the selected
+		 * AKMP per IEEE P802.11bi/D4.0, 12.16.9.1. */
+		RSN_SELECTOR_PUT(pos, RSN_AUTH_KEY_MGMT_EPPKE);
+		break;
+#endif /* CONFIG_ENC_ASSOC */
 #ifdef CONFIG_SAE
 	case WPA_KEY_MGMT_SAE:
 		RSN_SELECTOR_PUT(pos, RSN_AUTH_KEY_MGMT_SAE);
@@ -4384,6 +4557,18 @@ int wpa_pasn_validate_rsne(const struct wpa_ie_data *data, bool is_eppke)
 #endif /* CONFIG_IEEE80211R */
 	case WPA_KEY_MGMT_PASN:
 		break;
+#ifdef CONFIG_ENC_ASSOC
+	case WPA_KEY_MGMT_EPPKE:
+		/* EPPKE AKMP is used when EPPKE is performed without a base
+		 * AKM (no mutual authentication). This is only valid for EPPKE
+		 * authentication per IEEE P802.11bi/D4.0, 12.16.9.1. */
+		if (!is_eppke) {
+			wpa_printf(MSG_INFO,
+				   "PASN: EPPKE AKM not allowed for PASN");
+			return -1;
+		}
+		break;
+#endif /* CONFIG_ENC_ASSOC */
 	default:
 		wpa_printf(MSG_ERROR, "%s: invalid key_mgmt: 0x%0x",
 			   is_eppke ? "EPPKE" : "PASN", data->key_mgmt);
@@ -4503,7 +4688,7 @@ int wpa_pasn_parse_parameter_ie(const u8 *data, u8 len, bool from_ap,
 }
 
 
-void wpa_pasn_add_rsnxe(struct wpabuf *buf, u32 capab)
+void wpa_pasn_add_rsnxe(struct wpabuf *buf, u64 capab)
 {
 	size_t flen;
 
@@ -4511,7 +4696,15 @@ void wpa_pasn_add_rsnxe(struct wpabuf *buf, u32 capab)
 		return; /* no supported extended RSN capabilities */
 
 	/* Determine how many octets are needed to represent capab */
-	if (capab & 0xFF000000)
+	if (capab & 0xFF00000000000000ULL)
+		flen = 8;
+	else if (capab & 0x00FF000000000000ULL)
+		flen = 7;
+	else if (capab & 0x0000FF0000000000ULL)
+		flen = 6;
+	else if (capab & 0x000000FF00000000ULL)
+		flen = 5;
+	else if (capab & 0xFF000000)
 		flen = 4;
 	else if (capab & 0x00FF0000)
 		flen = 3;
@@ -4535,6 +4728,14 @@ void wpa_pasn_add_rsnxe(struct wpabuf *buf, u32 capab)
 		wpabuf_put_u8(buf, (capab >> 16) & 0x000000FF);
 	if (flen > 3)
 		wpabuf_put_u8(buf, (capab >> 24) & 0x000000FF);
+	if (flen > 4)
+		wpabuf_put_u8(buf, (capab >> 32) & 0x000000FF);
+	if (flen > 5)
+		wpabuf_put_u8(buf, (capab >> 40) & 0x000000FF);
+	if (flen > 6)
+		wpabuf_put_u8(buf, (capab >> 48) & 0x000000FF);
+	if (flen > 7)
+		wpabuf_put_u8(buf, (capab >> 56) & 0x000000FF);
 }
 
 
@@ -4581,4 +4782,23 @@ bool rsn_is_snonce_cookie(const u8 *snonce)
 	pos = snonce + WPA_NONCE_LEN - 6;
 	return WPA_GET_BE24(pos) == OUI_WFA &&
 		WPA_GET_BE24(pos + 3) == 0x000029;
+}
+
+
+void wpa_add_supported_groups(struct wpabuf *buf, const int *groups)
+{
+	unsigned int count, i;
+
+	if (!buf || !groups)
+		return;
+
+	count = int_array_len(groups);
+	if (wpabuf_tailroom(buf) < 2 + 1 + count * 2)
+		return;
+
+	wpabuf_put_u8(buf, WLAN_EID_EXTENSION);
+	wpabuf_put_u8(buf, 1 + count * 2);
+	wpabuf_put_u8(buf, WLAN_EID_EXT_SUPPORTED_GROUPS);
+	for (i = 0; i < count; i++)
+		wpabuf_put_le16(buf, groups[i]);
 }

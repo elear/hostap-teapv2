@@ -170,6 +170,7 @@ void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
 #ifdef CONFIG_TESTING_OPTIONS
 	bss->sae_commit_status = -1;
 	bss->test_assoc_comeback_type = -1;
+	bss->association_response_status_code = -1;
 #endif /* CONFIG_TESTING_OPTIONS */
 
 #ifdef CONFIG_PASN
@@ -312,6 +313,8 @@ struct hostapd_config * hostapd_config_defaults(void)
 #endif /* CONFIG_AIRTIME_POLICY */
 
 	hostapd_set_and_check_bw320_offset(conf, 0);
+
+	conf->disable_mcs15_rx = true;
 
 	return conf;
 }
@@ -1017,6 +1020,9 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 
 #ifdef CONFIG_PASN
 	os_free(conf->pasn_groups);
+#ifdef CONFIG_TESTING_OPTIONS
+	os_free(conf->pasn_test_groups);
+#endif /* CONFIG_TESTING_OPTIONS */
 #endif /* CONFIG_PASN */
 
 	wpabuf_clear_free(conf->sae_pw_id_key);
@@ -1513,7 +1519,8 @@ static int hostapd_config_check_bss(struct hostapd_bss_config *bss,
 			   "Enabling beacon protection as IEEE 802.11be is enabled for this BSS");
 	}
 
-	if ((!conf->ieee80211be || bss->disable_11be) && bss->mld_ap) {
+	if (full_config && (!conf->ieee80211be || bss->disable_11be) &&
+	    bss->mld_ap) {
 		wpa_printf(MSG_INFO,
 			   "Cannot enable mld_ap when IEEE 802.11be is disabled");
 		return -1;

@@ -333,6 +333,14 @@ OBJS += nan_supplicant.o
 OBJS += ../src/nan/nan.o
 OBJS += ../src/common/nan_de.o
 OBJS += ../src/nan/nan_util.o
+OBJS += ../src/nan/nan_ndp.o
+OBJS += ../src/nan/nan_ndl.o
+OBJS += ../src/nan/nan_crypto.o
+OBJS += ../src/nan/nan_sec.o
+OBJS += ../src/nan/nan_bootstrap.o
+ifdef CONFIG_PASN
+OBJS += ../src/nan/nan_pairing.o
+endif
 endif
 
 ifdef CONFIG_PR
@@ -448,6 +456,11 @@ CONFIG_ENC_ASSOC=y
 CFLAGS += -DCONFIG_PMKSA_PRIVACY
 endif
 
+ifdef CONFIG_IEEE8021X_AUTH
+CONFIG_ENC_ASSOC=y
+CFLAGS += -DCONFIG_IEEE8021X_AUTH
+endif
+
 ifdef CONFIG_ENC_ASSOC
 CONFIG_PASN=y
 CFLAGS += -DCONFIG_ENC_ASSOC
@@ -460,6 +473,7 @@ NEED_HMAC_SHA256_KDF=y
 NEED_HMAC_SHA384_KDF=y
 NEED_SHA256=y
 NEED_SHA384=y
+NEED_DRAGONFLY=y
 OBJS += ../src/pasn/pasn_initiator.o
 OBJS += ../src/pasn/pasn_common.o
 OBJS += pasn_supplicant.o
@@ -1068,6 +1082,9 @@ endif
 ifdef CONFIG_IEEE80211BE
 OBJS += ../src/ap/ieee802_11_eht.o
 endif
+ifdef CONFIG_IEEE80211BN
+OBJS += ../src/ap/ieee802_11_uhr.o
+endif
 ifdef CONFIG_WNM_AP
 CFLAGS += -DCONFIG_WNM_AP
 OBJS += ../src/ap/wnm_ap.o
@@ -1090,6 +1107,10 @@ OBJS += ../src/eap_server/eap_server_methods.o
 ifdef CONFIG_IEEE80211AC
 CFLAGS += -DCONFIG_IEEE80211AC
 endif
+ifdef CONFIG_IEEE80211BN
+CONFIG_IEEE80211BE=y
+CFLAGS += -DCONFIG_IEEE80211BN
+endif
 ifdef CONFIG_IEEE80211BE
 CONFIG_IEEE80211AX=y
 CFLAGS += -DCONFIG_IEEE80211BE
@@ -1106,6 +1127,7 @@ OBJS += ../src/pasn/pasn_responder.o
 OBJS += ../src/ap/ieee802_11.o
 OBJS += ../src/ap/hw_features.o
 OBJS += ../src/ap/dfs.o
+OBJS += ../src/ap/interference.o
 CFLAGS += -DNEED_AP_MLME
 endif
 ifdef CONFIG_WPS
@@ -1971,6 +1993,10 @@ OBJS += ../src/common/common_module_tests.o
 OBJS += ../src/crypto/crypto_module_tests.o
 ifdef CONFIG_WPS
 OBJS += ../src/wps/wps_module_tests.o
+endif
+ifdef CONFIG_NAN
+OBJS += ../src/nan/nan_module_tests.o
+OBJS += ../src/nan/nan_module_test_cases.o
 endif
 endif
 

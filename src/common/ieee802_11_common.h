@@ -128,6 +128,11 @@ struct ieee802_11_elems {
 	const u8 *rsn_selection;
 	const u8 *wfa_capab;
 	const u8 *proximity_ranging;
+	const u8 *akm_suite_selector;
+	const u8 *supported_groups;
+	const u8 *nan_ie;
+	const u8 *uhr_capabilities;
+	const u8 *uhr_operation;
 
 	u8 ssid_len;
 	u8 supp_rates_len;
@@ -172,6 +177,7 @@ struct ieee802_11_elems {
 	size_t key_delivery_len;
 	size_t wrapped_data_len;
 	u8 fils_pk_len;
+	u8 nonce_len;
 	u8 owe_dh_len;
 	u8 power_capab_len;
 	u8 roaming_cons_sel_len;
@@ -198,6 +204,11 @@ struct ieee802_11_elems {
 	size_t rsn_selection_len;
 	u8 wfa_capab_len;
 	size_t proximity_ranging_len;
+	u8 akm_suite_selector_len;
+	u8 supported_groups_len;
+	size_t nan_len;
+	u8 uhr_capabilities_len;
+	u8 uhr_operation_len;
 
 	struct mb_ies_info mb_ies;
 
@@ -324,6 +335,10 @@ bool is_same_band(int freq1, int freq2);
 #define IS_2P4GHZ(n) (n >= 2412 && n <= 2484)
 #define IS_5GHZ(n) (n > 4000 && n < 5895)
 
+u8 op_class_idx_to_chan(const struct oper_class_map *op, u8 idx);
+int op_class_chan_to_idx(const struct oper_class_map *op, u8 chan);
+int ieee80211_get_center_freq(int ctrl_freq, u32 bw);
+
 int ieee802_11_parse_candidate_list(const char *pos, u8 *nei_rep,
 				    size_t nei_rep_len);
 
@@ -334,6 +349,7 @@ bool ieee802_11_rsnx_capab(const u8 *rsnxe, unsigned int capab);
 int op_class_to_bandwidth(u8 op_class);
 enum oper_chan_width op_class_to_ch_width(u8 op_class);
 int chwidth_freq2_to_ch_width(int chwidth, int freq2);
+enum oper_chan_width chan_width_to_oper_chwidth(enum chan_width chan_width);
 
 /* element iteration helpers */
 #define for_each_element(_elem, _data, _datalen)			\

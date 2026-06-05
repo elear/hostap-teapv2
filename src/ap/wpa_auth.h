@@ -294,6 +294,10 @@ struct wpa_auth_config {
 	unsigned int assoc_frame_encryption:1;
 	unsigned int pmksa_caching_privacy:1;
 	unsigned int eap_using_authentication_frames:1;
+#ifdef CONFIG_PASN
+	/* Whether to allow unauthenticated EPPKE (EPPKE without base AKM) */
+	bool eppke_unauth;
+#endif /* CONFIG_PASN */
 #endif /* CONFIG_ENC_ASSOC */
 
 	int owe_ptk_workaround;
@@ -391,6 +395,12 @@ struct wpa_auth_callbacks {
 						 void *ctx), void *cb_ctx);
 	int (*for_each_auth)(void *ctx, int (*cb)(struct wpa_authenticator *a,
 						  void *ctx), void *cb_ctx);
+#ifdef CONFIG_IEEE80211BE
+	int (*for_each_partner_auth)(void *ctx,
+				     int (*cb)(struct wpa_authenticator *a,
+					       void *ctx),
+				     void *cb_ctx);
+#endif /* CONFIG_IEEE80211BE */
 	int (*send_ether)(void *ctx, const u8 *dst, u16 proto, const u8 *data,
 			  size_t data_len);
 	int (*send_oui)(void *ctx, const u8 *dst, u8 oui_suffix, const u8 *data,
@@ -670,6 +680,7 @@ void wpa_store_eppke_pmk_ptk_sm(struct wpa_state_machine *sm,
 				size_t pmk_len);
 int wpa_auth_epp_derive_new_pmkid(const u8 *anonce, const u8 *snonce,
 				  int akmp, size_t pmk_len, u8 *pmkid);
+bool wpa_auth_ap_sta_support_assoc_enc(struct wpa_state_machine *sm);
 
 int wpa_auth_resend_m1(struct wpa_state_machine *sm, int change_anonce,
 		       void (*cb)(void *ctx1, void *ctx2),
@@ -739,5 +750,20 @@ struct wpa_group * wpa_select_vlan_wpa_group(struct wpa_group *gsm,
 void wpa_auth_set_sae_pw_id(struct wpa_state_machine *sm,
 			    const struct wpabuf *pw_id,
 			    unsigned int counter);
+
+int wpa_auth_802_1x_get_msk(struct wpa_authenticator *wpa_auth,
+			     const u8 *addr, u8 *msk, size_t *len);
+int wpa_auth_802_1x_set_key(struct wpa_authenticator *wpa_auth,
+			    enum wpa_alg alg, const u8 *addr,
+			    u8 *key, size_t key_len);
+bool wpa_auth_ap_support_secure_ltf(struct wpa_authenticator *wpa_auth);
+int wpa_write_802_1x_rsne(struct wpa_authenticator *wpa_auth, u8 *buf,
+			  size_t len, const u8 *pmkid, int akmp,
+			  int pairwise_cipher, int group_cipher,
+			  int group_mgmt_cipher, enum mfp_options mfp);
+int wpa_write_eppke_rsne(const u8 *wpa_ie, size_t wpa_ie_len,
+			 u8 *buf, size_t len,
+			 const u8 *pmkid, int akmp,
+			 int pairwise_cipher, enum mfp_options mfp);
 
 #endif /* WPA_AUTH_H */

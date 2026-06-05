@@ -682,11 +682,20 @@ CONFIG_DPP2=y
 # Wi-Fi Aware (NAN) support
 #CONFIG_NAN=y
 
+# Proximity Ranging (PR) support
+#CONFIG_PR=y
+
 # Enhanced Privacy Protection (IEEE P802.11bi)
 # Note: These features are experimental and still changing; do not enable for
 # production use.
 # Encrypted association frame support (needed for EPPKE and EAP in
 # Authentication frames)
 #CONFIG_ENC_ASSOC=y
+#
 # PMKSA caching privacy support
 #CONFIG_PMKSA_PRIVACY=y
+#
+# IEEE 802.1X (EAP) authentication in Authentication frames
+# IEEE P802.11bi/D4.0, 12.16.5 (IEEE 802.1X authentication utilizing
+# Authentication frames)
+#CONFIG_IEEE8021X_AUTH=y

@@ -579,6 +579,7 @@ struct hostapd_bss_config {
 	bool disable_11ac;
 	bool disable_11ax;
 	bool disable_11be;
+	bool disable_11bn;
 
 	/* IEEE 802.11v */
 	int time_advertisement;
@@ -719,6 +720,7 @@ struct hostapd_bss_config {
 	bool eapol_key_reserved_random;
 	int test_assoc_comeback_type;
 	struct wpabuf *presp_elements;
+	int association_response_status_code;
 
 #ifdef CONFIG_IEEE80211BE
 	u16 eht_oper_puncturing_override;
@@ -945,6 +947,11 @@ struct hostapd_bss_config {
 	/* Whether to allow PASN-UNAUTH */
 	int pasn_noauth;
 
+#ifdef CONFIG_ENC_ASSOC
+	/* Whether to allow unauthenticated EPPKE (EPPKE without base AKM) */
+	bool eppke_unauth;
+#endif /* CONFIG_ENC_ASSOC */
+
 #ifdef CONFIG_TESTING_OPTIONS
 	/*
 	 * Normally, KDK should be derived if and only if both sides support
@@ -954,6 +961,12 @@ struct hostapd_bss_config {
 
 	/* If set, corrupt the MIC in the 2nd Authentication frame of PASN */
 	int pasn_corrupt_mic;
+
+	/*
+	 * If set, override Supported Groups element in the 2nd Authentication
+	 * frame of PASN for group negotiation testing.
+	 */
+	int *pasn_test_groups;
 #endif /* CONFIG_TESTING_OPTIONS */
 
 	int *pasn_groups;
@@ -1240,7 +1253,15 @@ struct hostapd_config {
 	u8 punct_acs_threshold;
 	u8 eht_default_pe_duration;
 	u8 eht_bw320_offset;
+	bool require_eht;
 #endif /* CONFIG_IEEE80211BE */
+
+	int ieee80211bn;
+#ifdef CONFIG_IEEE80211BN
+	bool require_uhr;
+	u8 dbe_bandwidth;
+	u16 dbe_punct_bitmap;
+#endif /* CONFIG_IEEE80211BN */
 
 	/* EHT enable/disable config from CHAN_SWITCH */
 #define CH_SWITCH_EHT_ENABLED BIT(0)
@@ -1262,6 +1283,9 @@ struct hostapd_config {
 
 	/* Set I2R LMR policy to allow LMR response from ISTA */
 	bool i2r_lmr_policy;
+
+	/* Disable MCS15 Subfield in EHT operation element */
+	bool disable_mcs15_rx;
 };
 
 

@@ -537,8 +537,8 @@ static int wpas_p2p_scan(void *ctx, enum p2p_scan_type type, int freq,
 	wpabuf_free(ies);
 
 	radio_remove_works(wpa_s, "p2p-scan", 0);
-	if (radio_add_work(wpa_s, 0, "p2p-scan", 0, wpas_p2p_trigger_scan_cb,
-			   params) < 0)
+	if (!radio_add_work(wpa_s, 0, "p2p-scan", 0, wpas_p2p_trigger_scan_cb,
+			    params))
 		goto fail;
 	return 0;
 
@@ -1825,8 +1825,8 @@ static int wpas_send_action_work(struct wpa_supplicant *wpa_s,
 	awork->wait_time = wait_time;
 	os_memcpy(awork->buf, buf, len);
 
-	if (radio_add_work(wpa_s, freq, "p2p-send-action", 1,
-			   wpas_send_action_cb, awork) < 0) {
+	if (!radio_add_work(wpa_s, freq, "p2p-send-action", 1,
+			    wpas_send_action_cb, awork)) {
 		os_free(awork);
 		return -1;
 	}
@@ -1991,8 +1991,8 @@ static int wpas_p2p_initiate_pasn_auth(struct wpa_supplicant *wpa_s,
 	awork->freq = freq;
 	os_memcpy(awork->peer_addr, peer_addr, ETH_ALEN);
 
-	if (radio_add_work(wpa_s, freq, "p2p-pasn-start-auth", 1,
-			   wpas_p2p_pasn_auth_start_cb, awork) < 0) {
+	if (!radio_add_work(wpa_s, freq, "p2p-pasn-start-auth", 1,
+			    wpas_p2p_pasn_auth_start_cb, awork)) {
 		wpas_p2p_pasn_free_auth_work(awork);
 		return -1;
 	}
@@ -3214,6 +3214,20 @@ static void wpas_p2p_listen_work_done(struct wpa_supplicant *wpa_s)
 }
 
 
+static void wpas_stop_started_listen_work(struct wpa_radio_work *work)
+{
+	struct wpa_supplicant *wpa_s = work->wpa_s;
+
+	wpa_s->p2p_listen_work = NULL;
+	work->ctx = NULL;
+
+	/* Prevent recursive p2p-listen work removal while handling deinit. */
+	wpa_s->p2p_removing_listen_work = true;
+	wpas_stop_listen(wpa_s);
+	wpa_s->p2p_removing_listen_work = false;
+}
+
+
 static void wpas_start_listen_cb(struct wpa_radio_work *work, int deinit)
 {
 	struct wpa_supplicant *wpa_s = work->wpa_s;
@@ -3221,10 +3235,8 @@ static void wpas_start_listen_cb(struct wpa_radio_work *work, int deinit)
 	unsigned int duration;
 
 	if (deinit) {
-		if (work->started && !wpa_s->p2p_removing_listen_work) {
-			wpa_s->p2p_listen_work = NULL;
-			wpas_stop_listen(wpa_s);
-		}
+		if (work->started && !wpa_s->p2p_removing_listen_work)
+			wpas_stop_started_listen_work(work);
 		wpas_p2p_listen_work_free(lwork);
 		return;
 	}
@@ -3253,7 +3265,7 @@ static void wpas_start_listen_cb(struct wpa_radio_work *work, int deinit)
 	}
 #endif /* CONFIG_TESTING_OPTIONS */
 
-	if (wpa_drv_remain_on_channel(wpa_s, lwork->freq, duration) < 0) {
+	if (wpa_drv_remain_on_channel(wpa_s, lwork->freq, duration, NULL) < 0) {
 		wpa_printf(MSG_DEBUG, "P2P: Failed to request the driver "
 			   "to remain on channel (%u MHz) for Listen "
 			   "state", lwork->freq);
@@ -3292,8 +3304,8 @@ static int wpas_start_listen(void *ctx, unsigned int freq,
 		}
 	}
 
-	if (radio_add_work(wpa_s, freq, "p2p-listen", 0, wpas_start_listen_cb,
-			   lwork) < 0) {
+	if (!radio_add_work(wpa_s, freq, "p2p-listen", 0, wpas_start_listen_cb,
+			    lwork)) {
 		wpas_p2p_listen_work_free(lwork);
 		return -1;
 	}
@@ -3949,7 +3961,7 @@ static void wpas_invitation_received(void *ctx, const u8 *sa, const u8 *bssid,
 				wpa_s->conf->p2p_go_edmg, NULL,
 				go ? P2P_MAX_INITIAL_CONN_WAIT_GO_REINVOKE : 0,
 				1, is_p2p_allow_6ghz(wpa_s->global->p2p), 0,
-				bssid, sa, pmkid, pmk, pmk_len, false);
+				bssid, sa, pmkid, pmk, pmk_len, false, true);
 		} else if (bssid) {
 			wpa_s->user_initiated_pd = 0;
 			wpa_msg_global(wpa_s, MSG_INFO,
@@ -4254,7 +4266,8 @@ static void wpas_invitation_result(void *ctx, int status, const u8 *new_ssid,
 				      P2P_MAX_INITIAL_CONN_WAIT_GO_REINVOKE :
 				      0, 1,
 				      is_p2p_allow_6ghz(wpa_s->global->p2p), 0,
-				      bssid, peer, pmkid, pmk, pmk_len, false);
+				      bssid, peer, pmkid, pmk, pmk_len, false,
+				      true);
 }
 
 
@@ -4811,8 +4824,9 @@ int wpas_p2p_get_vht160_center(struct wpa_supplicant *wpa_s,
 		if (!wpa_s->p2p_go_allow_dfs && !wpa_s->allow_p2p_assisted_dfs)
 			return 0;
 
-		/* For negotiated GO, require assisted DFS */
-		if (wpa_s->p2p_neg_go_setup && !wpa_s->assisted_dfs)
+		/* For negotiated GO and P2P invitation, require assisted DFS */
+		if ((wpa_s->p2p_neg_go_setup || wpa_s->p2p_in_invitation) &&
+		    !wpa_s->assisted_dfs)
 			return 0;
 	} else if (ret != ALLOWED) {
 		return 0;
@@ -5367,7 +5381,7 @@ static void wpas_p2ps_prov_complete(void *ctx, enum p2p_status_code status,
 					WPAS_MODE_P2P_GO ?
 					P2P_MAX_INITIAL_CONN_WAIT_GO_REINVOKE :
 					0, 0, false, 0, NULL, NULL, NULL, NULL,
-					0, false);
+					0, false, false);
 			} else if (response_done) {
 				wpas_p2p_group_add(wpa_s, 1, freq,
 						   0, 0, 0, 0, 0, 0, false,
@@ -5493,7 +5507,7 @@ static int wpas_prov_disc_resp_cb(void *ctx)
 			persistent_go->mode == WPAS_MODE_P2P_GO ?
 			P2P_MAX_INITIAL_CONN_WAIT_GO_REINVOKE : 0, 0,
 			is_p2p_allow_6ghz(wpa_s->global->p2p), 0, NULL, NULL,
-			NULL, NULL, 0, false);
+			NULL, NULL, 0, false, false);
 	} else {
 		wpas_p2p_group_add(wpa_s, 1, freq, 0, 0, 0, 0, 0, 0,
 				   is_p2p_allow_6ghz(wpa_s->global->p2p),
@@ -5708,8 +5722,8 @@ static int wpas_p2p_initiate_pasn_verify(struct wpa_supplicant *wpa_s,
 		awork->ssid_len = ssid_len;
 	}
 
-	if (radio_add_work(wpa_s, freq, "p2p-pasn-start-auth", 1,
-			   wpas_p2p_pasn_auth_start_cb, awork) < 0) {
+	if (!radio_add_work(wpa_s, freq, "p2p-pasn-start-auth", 1,
+			    wpas_p2p_pasn_auth_start_cb, awork)) {
 		wpas_p2p_pasn_free_auth_work(awork);
 		return -1;
 	}
@@ -8360,7 +8374,8 @@ int wpas_p2p_group_add_persistent(struct wpa_supplicant *wpa_s,
 				  bool allow_6ghz, int retry_limit,
 				  const u8 *go_bssid, const u8 *dev_addr,
 				  const u8 *pmkid, const u8 *pmk,
-				  size_t pmk_len, bool join)
+				  size_t pmk_len, bool join,
+				  bool is_invitation)
 {
 	struct p2p_go_neg_results params;
 	int go = 0, freq;
@@ -8483,6 +8498,7 @@ int wpas_p2p_group_add_persistent(struct wpa_supplicant *wpa_s,
 	p2p_channels_to_freqs(channels, params.freq_list, P2P_MAX_CHANNELS);
 
 	wpa_s->p2p_first_connection_timeout = connection_timeout;
+	wpa_s->p2p_in_invitation = is_invitation;
 	params.p2p2 = wpa_s->p2p2;
 	wpas_start_go(wpa_s, &params, 0, wpa_s->p2p_mode);
 

@@ -104,6 +104,12 @@ const char * event_to_string(enum wpa_event_type event)
 	E2S(SETUP_LINK_RECONFIG);
 	E2S(NAN_CLUSTER_JOIN);
 	E2S(NAN_NEXT_DW);
+	E2S(INCUMBT_SIG_INTF_DETECTED);
+	E2S(NAN_SCHED_UPDATE_DONE);
+	E2S(NAN_ULW_UPDATE);
+	E2S(NAN_CHAN_EVACUATION);
+	E2S(PEER_MEASUREMENT_RESULT);
+	E2S(PEER_MEASUREMENT_COMPLETE);
 	}
 
 	return "UNKNOWN";
@@ -203,6 +209,28 @@ bool he_supported(const struct hostapd_hw_modes *hw_mode,
 	}
 
 	return hw_mode->he_capab[op_mode].he_supported;
+}
+
+
+bool eht_supported(const struct hostapd_hw_modes *hw_mode,
+		   enum ieee80211_op_mode op_mode)
+{
+	if (!(hw_mode->flags & HOSTAPD_MODE_FLAG_EHT_INFO_KNOWN)) {
+		/*
+		 * The driver did not indicate whether it supports EHT. Assume
+		 * it does to avoid connection issues.
+		 */
+		return true;
+	}
+
+	return hw_mode->eht_capab[op_mode].eht_supported;
+}
+
+
+bool uhr_supported(const struct hostapd_hw_modes *hw_mode,
+		   enum ieee80211_op_mode op_mode)
+{
+	return hw_mode->uhr_capab[op_mode].uhr_supported;
 }
 
 

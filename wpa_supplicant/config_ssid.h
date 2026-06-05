@@ -1301,6 +1301,14 @@ struct wpa_ssid {
 	int disable_eht;
 
 	/**
+	 * disable_uhr - Disable UHR (IEEE 802.11bn) for this network
+	 *
+	 * By default, use it if it is available, but this can be configured
+	 * to 1 to have it disabled.
+	 */
+	int disable_uhr;
+
+	/**
 	 * enable_4addr_mode - Set 4addr mode after association
 	 * 0 = Do not attempt to set 4addr mode
 	 * 1 = Try to set 4addr mode after association
@@ -1354,6 +1362,50 @@ struct wpa_ssid {
 	 * connection even if the same cached PMKSA is reused.
 	 */
 	int pmksa_privacy;
+
+#ifdef CONFIG_IEEE8021X_AUTH
+	/**
+	 * eap_over_auth_frame - IEEE 802.1X authentication in Authentication
+	 * frames
+	 * 0 = Disabled (i.e., use EAP in EAPOL frames) (default)
+	 * 1 = Enabled (i.e., use EAP in Authentication frames and encrypt
+	 *	associations frames)
+	 */
+	int eap_over_auth_frame;
+#endif /* CONFIG_IEEE8021X_AUTH */
+
+	/**
+	 * drop_unicast_ip_in_l2_multicast - Drop unicast IP packets in L2
+	 *	multicast frames in all networks, not just Passpoint non-DGAF
+	 *	networks
+	 */
+	bool drop_unicast_ip_in_l2_multicast;
+
+	/**
+	 * always_use_proxy_arp - Always rely on proxy ARP even in non-Passpoint
+	 *	networks
+	 * 0 = disabled
+	 * 1 = check AP's extended capabilities
+	 * 2 = always enable
+	 */
+	int always_use_proxy_arp;
+
+#ifdef CONFIG_PASN
+	/**
+	 * pasn_groups - Preference list of enabled groups for PASN
+	 *
+	 * As per IEEE Std 802.11-2024, 12.13.1, both STAs must have at least
+	 * one cyclic group in common from the dot11RSNAConfigDLCGroupTable for
+	 * ephemeral key exchange. For interoperability, a STA shall support
+	 * group 19 (ECC group defined over a 256-bit prime order field), which
+	 * is used as the default if this parameter is not set. Only suitable
+	 * ECC groups (e.g., 19, 20, 21) are accepted.
+	 *
+	 * If this per-network parameter is not configured, the global
+	 * pasn_groups parameter is used. If neither is set, group 19 is used.
+	 */
+	int *pasn_groups;
+#endif /* CONFIG_PASN */
 };
 
 #endif /* CONFIG_SSID_H */

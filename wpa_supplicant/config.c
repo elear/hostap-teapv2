@@ -276,6 +276,69 @@ static char * wpa_config_write_int(const struct parse_data *data,
 #endif /* NO_CONFIG_WRITE */
 
 
+static int wpa_config_parse_bool(const struct parse_data *data,
+				 struct wpa_ssid *ssid,
+				 int line, const char *value)
+{
+	int val;
+	bool *dst;
+	char *end;
+
+	dst = (bool *) (((u8 *) ssid) + (long) data->param1);
+	val = strtol(value, &end, 0);
+	if (*end) {
+		wpa_printf(MSG_ERROR, "Line %d: invalid number \"%s\"",
+			   line, value);
+		return -1;
+	}
+
+	if (val < 0) {
+		wpa_printf(MSG_ERROR,
+			   "Line %d: too small %s (value=%d)",
+			   line, data->name, val);
+		return -1;
+	}
+
+	if (val > 1) {
+		wpa_printf(MSG_ERROR,
+			   "Line %d: too large %s (value=%d)",
+			   line, data->name, val);
+		return -1;
+	}
+
+	if (*dst == val)
+		return 1;
+
+	*dst = val;
+	wpa_printf(MSG_MSGDUMP, "%s=%d)", data->name, *dst);
+
+	return 0;
+}
+
+
+#ifndef NO_CONFIG_WRITE
+static char * wpa_config_write_bool(const struct parse_data *data,
+				   struct wpa_ssid *ssid)
+{
+	bool *src, res;
+	char *value;
+
+	src = (bool *) (((u8 *) ssid) + (long) data->param1);
+
+	value = os_malloc(20);
+	if (value == NULL)
+		return NULL;
+	res = os_snprintf(value, 20, "%d", *src);
+	if (os_snprintf_error(20, res)) {
+		os_free(value);
+		return NULL;
+	}
+	value[20 - 1] = '\0';
+	return value;
+}
+#endif /* NO_CONFIG_WRITE */
+
+
 static int wpa_config_parse_addr_list(const struct parse_data *data,
 				      int line, const char *value,
 				      u8 **list, size_t *num, char *name,
@@ -2498,6 +2561,37 @@ static char * wpa_config_write_mac_value(const struct parse_data *data,
 #endif /* NO_CONFIG_WRITE */
 
 
+#ifdef CONFIG_PASN
+static int wpa_config_parse_pasn_groups(const struct parse_data *data,
+					struct wpa_ssid *ssid, int line,
+					const char *value)
+{
+	int *groups;
+
+	groups = wpa_config_parse_int_array(value);
+	if (!groups)
+		return -1;
+	if (groups[0] == 0) {
+		os_free(groups);
+		groups = NULL;
+	}
+	os_free(ssid->pasn_groups);
+	ssid->pasn_groups = groups;
+
+	return 0;
+}
+
+
+#ifndef NO_CONFIG_WRITE
+static char * wpa_config_write_pasn_groups(const struct parse_data *data,
+					 struct wpa_ssid *ssid)
+{
+	return wpa_config_write_freqs(data, ssid->pasn_groups);
+}
+#endif /* NO_CONFIG_WRITE */
+#endif /* CONFIG_PASN */
+
+
 /* Helper macros for network block parser */
 
 #ifdef OFFSET
@@ -2558,6 +2652,20 @@ static char * wpa_config_write_mac_value(const struct parse_data *data,
 	wpa_config_write_int, OFFSET(f),	       \
 	(void *) 0, (void *) (min), (void *) (max), 0
 #endif /* NO_CONFIG_WRITE */
+
+#ifdef NO_CONFIG_WRITE
+#define _BOOL(f) #f, wpa_config_parse_bool, OFFSET(f), (void *) 0
+#define _BOOLe(f, m) #f, wpa_config_parse_bool, OFFSET(eap.m), (void *) 0
+#else /* NO_CONFIG_WRITE */
+#define _BOOL(f) #f, wpa_config_parse_bool, wpa_config_write_bool, \
+	OFFSET(f), (void *) 0
+#define _BOOLe(f, m) #f, wpa_config_parse_bool, wpa_config_write_bool,	\
+	OFFSET(eap.m), (void *) 0
+#endif /* NO_CONFIG_WRITE */
+
+/* INT: Define an integer variable */
+#define BOOL(f) _BOOL(f), NULL, NULL, 0
+#define BOOLe(f, m) _BOOLe(f, m), NULL, NULL, 0
 
 /* FUNC: Define a configuration variable that uses a custom function for
  * parsing and writing the value. */
@@ -2837,14 +2945,23 @@ static const struct parse_data ssid_fields[] = {
 	{ INT_RANGE(transition_disable, 0, 255) },
 	{ INT_RANGE(sae_pk, 0, 2) },
 	{ INT_RANGE(disable_eht, 0, 1)},
+	{ INT_RANGE(disable_uhr, 0, 1)},
 	{ INT_RANGE(enable_4addr_mode, 0, 1)},
 	{ INT_RANGE(max_idle, 0, 65535)},
-	{ INT_RANGE(ssid_protection, 0, 1)},
+	{ BOOL(ssid_protection)},
 	{ INT_RANGE(rsn_overriding, 0, 2)},
-	{ INT_RANGE(sae_password_id_change, 0, 1)},
+	{ BOOL(sae_password_id_change)},
 #ifdef CONFIG_PMKSA_PRIVACY
 	{ INT_RANGE(pmksa_privacy, 0, 1)},
 #endif /* CONFIG_PMKSA_PRIVACY */
+#ifdef CONFIG_IEEE8021X_AUTH
+	{ INT_RANGE(eap_over_auth_frame, 0, 1)},
+#endif /* CONFIG_IEEE8021X_AUTH */
+	{ BOOL(drop_unicast_ip_in_l2_multicast)},
+	{ INT_RANGE(always_use_proxy_arp, 0, 2)},
+#ifdef CONFIG_PASN
+	{ FUNC(pasn_groups) },
+#endif /* CONFIG_PASN */
 };
 
 #undef OFFSET
@@ -2860,6 +2977,10 @@ static const struct parse_data ssid_fields[] = {
 #undef _INT
 #undef INT
 #undef INT_RANGE
+#undef BOOLe
+#undef BOOL
+#undef _BOOLe
+#undef _BOOL
 #undef _FUNC
 #undef FUNC
 #undef FUNC_KEY
@@ -3050,6 +3171,9 @@ void wpa_config_free_ssid(struct wpa_ssid *ssid)
 #ifdef CONFIG_SAE
 	sae_deinit_pt(ssid->pt);
 #endif /* CONFIG_SAE */
+#ifdef CONFIG_PASN
+	os_free(ssid->pasn_groups);
+#endif /* CONFIG_PASN */
 	bin_clear_free(ssid, sizeof(*ssid));
 }
 
@@ -3180,6 +3304,9 @@ void wpa_config_free(struct wpa_config *config)
 	wpabuf_free(config->wps_nfc_dev_pw);
 	os_free(config->ext_password_backend);
 	os_free(config->sae_groups);
+#ifdef CONFIG_PASN
+	os_free(config->pasn_groups);
+#endif /* CONFIG_PASN */
 	wpabuf_free(config->ap_vendor_elements);
 	wpabuf_free(config->ap_assocresp_elements);
 	os_free(config->bgscan);
@@ -3410,6 +3537,7 @@ void wpa_config_set_network_defaults(struct wpa_ssid *ssid)
 	ssid->mac_addr = WPAS_MAC_ADDR_STYLE_NOT_SET;
 	ssid->max_oper_chwidth = DEFAULT_MAX_OPER_CHWIDTH;
 	ssid->rsn_overriding = RSN_OVERRIDING_NOT_SET;
+	ssid->drop_unicast_ip_in_l2_multicast = true;
 }
 
 
@@ -3476,6 +3604,11 @@ int wpa_config_set(struct wpa_ssid *ssid, const char *var, const char *value,
 		    os_strcmp(var, "sae_password_id") == 0) {
 			sae_deinit_pt(ssid->pt);
 			ssid->pt = NULL;
+		}
+		if (os_strcmp(var, "sae_password_id_change") == 0 &&
+		    !ssid->sae_password_id_change) {
+			wpabuf_array_free(ssid->alt_sae_password_ids);
+			ssid->alt_sae_password_ids = NULL;
 		}
 #endif /* CONFIG_SAE */
 		break;
@@ -5403,6 +5536,37 @@ static int wpa_config_process_sae_groups(
 }
 
 
+#ifdef CONFIG_PASN
+static int wpa_config_process_pasn_groups(
+	const struct global_parse_data *data,
+	struct wpa_config *config, int line, const char *pos)
+{
+	int *groups;
+
+	if (!pos || !*pos) {
+		/* Empty string clears pasn_groups if previously set */
+		if (config->pasn_groups) {
+			os_free(config->pasn_groups);
+			config->pasn_groups = NULL;
+		}
+		return 0;
+	}
+
+	groups = wpa_config_parse_int_array(pos);
+	if (!groups) {
+		wpa_printf(MSG_ERROR, "Line %d: Invalid pasn_groups '%s'",
+			   line, pos);
+		return -1;
+	}
+
+	os_free(config->pasn_groups);
+	config->pasn_groups = groups;
+
+	return 0;
+}
+#endif /* CONFIG_PASN */
+
+
 static int wpa_config_process_ap_vendor_elements(
 	const struct global_parse_data *data,
 	struct wpa_config *config, int line, const char *pos)
@@ -5840,6 +6004,7 @@ static const struct global_parse_data global_fields[] = {
 	{ INT_RANGE(wowlan_disconnect_on_deinit, 0, 1), 0},
 	{ INT_RANGE(rsn_overriding, 0, 2), 0},
 #ifdef CONFIG_PASN
+	{ FUNC(pasn_groups), 0 },
 #ifdef CONFIG_TESTING_OPTIONS
 	{ INT_RANGE(force_kdk_derivation, 0, 1), 0 },
 	{ INT_RANGE(pasn_corrupt_mic, 0, 1), 0 },

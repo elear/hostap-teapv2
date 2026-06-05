@@ -35,6 +35,7 @@ struct ieee80211_ht_capabilities;
 struct full_dynamic_vlan;
 enum wps_event;
 union wps_event_data;
+struct rsn_pmksa_cache_entry;
 #ifdef CONFIG_MESH
 struct mesh_conf;
 #endif /* CONFIG_MESH */
@@ -329,6 +330,13 @@ struct hostapd_data {
 			   size_t psk_len);
 	void *new_psk_cb_ctx;
 
+#ifdef CONFIG_IEEE8021X_AUTH
+	void (*send_eap_req)(struct hostapd_data *hapd, struct sta_info *sta,
+			     u8 type, u16 auth_transaction, u16 status,
+			     struct rsn_pmksa_cache_entry *cached_pmk,
+			     const u8 *eap_req, size_t eap_req_len);
+#endif /* CONFIG_IEEE8021X_AUTH */
+
 	/* channel switch parameters */
 	struct hostapd_freq_params cs_freq_params;
 	u8 cs_count;
@@ -516,6 +524,8 @@ struct hostapd_data {
 
 #ifdef CONFIG_NAN_USD
 	struct nan_de *nan_de;
+	/* Whether nan_de should be freed on deinit */
+	bool nan_de_is_owned;
 #endif /* CONFIG_NAN_USD */
 
 	u64 scan_cookie; /* Scan instance identifier for the ongoing HT40 scan
@@ -880,6 +890,8 @@ int hostapd_build_beacon_data(struct hostapd_data *hapd,
 void free_beacon_data(struct beacon_data *beacon);
 int hostapd_fill_cca_settings(struct hostapd_data *hapd,
 			      struct cca_settings *settings);
+void hostapd_switch_color_timeout_handler(void *eloop_data, void *user_ctx);
+bool hostapd_is_cca_in_progress(struct hostapd_iface *iface);
 void hostapd_refresh_all_iface_beacons(struct hostapd_iface *hapd_iface);
 
 #ifdef CONFIG_IEEE80211BE
@@ -903,6 +915,15 @@ static inline bool hostapd_mld_is_first_bss(struct hostapd_data *hapd)
 #endif /* CONFIG_IEEE80211BE */
 
 u16 hostapd_get_punct_bitmap(struct hostapd_data *hapd);
+
+void hostapd_get_oper_chan_info_of_bss(struct hostapd_data *hapd,
+				       enum oper_chan_width *width,
+				       u8 *seg0, u8 *seg1);
+
+u8 hostapd_get_oper_class_of_bss(struct hostapd_data *hapd);
+
+enum oper_chan_width
+hostapd_get_oper_chan_width_of_bss(struct hostapd_data *hapd);
 
 static inline bool ap_pmf_enabled(struct hostapd_bss_config *conf)
 {
@@ -942,6 +963,12 @@ static inline bool
 hostapd_is_eht_enabled(struct hostapd_data *hapd)
 {
 	return hapd->iconf->ieee80211be && !hapd->conf->disable_11be;
+}
+
+static inline bool
+hostapd_is_uhr_enabled(struct hostapd_data *hapd)
+{
+	return hapd->iconf->ieee80211bn && !hapd->conf->disable_11bn;
 }
 
 #endif /* HOSTAPD_H */

@@ -328,6 +328,9 @@ int wpa_supplicant_conf_ap_ht(struct wpa_supplicant *wpa_s,
 			ssid->he = 0;
 #endif /* CONFIG_HE_OVERRIDES */
 
+		if (ssid->disable_eht)
+			ssid->eht = 0;
+
 		if (!ssid->ht) {
 			wpa_printf(MSG_DEBUG,
 				   "HT not enabled in network profile");
@@ -1156,6 +1159,14 @@ int wpa_supplicant_create_ap(struct wpa_supplicant *wpa_s,
 		hapd_iface->bss[i]->ext_eapol_frame_io =
 			wpa_s->ext_eapol_frame_io;
 #endif /* CONFIG_TESTING_OPTIONS */
+
+#ifdef CONFIG_NAN_USD
+		/*
+		 * Copy NAN DE pointer from wpa_supplicant to hostapd for AP
+		 * to continue processing NAN USD frames.
+		 */
+		hapd_iface->bss[i]->nan_de = wpa_s->nan_de;
+#endif /* CONFIG_NAN_USD */
 
 #ifdef CONFIG_WNM_AP
 		if (ssid->mode == WPAS_MODE_AP)
@@ -2145,7 +2156,7 @@ void wpas_ap_event_dfs_cac_started(struct wpa_supplicant *wpa_s,
 	if (!iface || !iface->bss[0])
 		return;
 	wpa_printf(MSG_DEBUG, "DFS CAC started on %d MHz", radar->freq);
-	hostapd_dfs_start_cac(iface, radar->freq,
+	hostapd_dfs_start_cac(iface->bss[0], radar->freq,
 			      radar->ht_enabled, radar->chan_offset,
 			      radar->chan_width, radar->cf1, radar->cf2);
 }

@@ -4,6 +4,8 @@ tests/hwsim/logs
 tests/remote/logs
 wpaspy/build
 **/parallel-vm.log
+**/*.orig
+**/*.rej
 tags
 build/
 # clangd commands and cache

@@ -336,6 +336,9 @@ static void hostapd_wpa_auth_conf(struct hostapd_iface *iface,
 	wconf->dpp_pfs = conf->dpp_pfs;
 #endif /* CONFIG_DPP2 */
 #ifdef CONFIG_PASN
+#ifdef CONFIG_ENC_ASSOC
+	wconf->eppke_unauth = conf->eppke_unauth;
+#endif /* CONFIG_ENC_ASSOC */
 #ifdef CONFIG_TESTING_OPTIONS
 	wconf->force_kdk_derivation = conf->force_kdk_derivation;
 #endif /* CONFIG_TESTING_OPTIONS */
@@ -777,6 +780,29 @@ static int hostapd_wpa_auth_for_each_auth(
 	return hapd->iface->interfaces->for_each_interface(
 		hapd->iface->interfaces, wpa_auth_iface_iter, &data);
 }
+
+
+#ifdef CONFIG_IEEE80211BE
+static int hostapd_wpa_auth_for_each_partner_auth(
+	void *ctx, int (*cb)(struct wpa_authenticator *sm, void *ctx),
+	void *cb_ctx)
+{
+	struct hostapd_data *hapd = ctx;
+	struct hostapd_data *bss;
+
+	if (cb(hapd->wpa_auth, cb_ctx))
+		return 1;
+
+	if (!hapd->mld)
+		return 0;
+
+	for_each_mld_link(bss, hapd) {
+		if (bss != hapd && bss->wpa_auth && cb(bss->wpa_auth, cb_ctx))
+			return 1;
+	}
+	return 0;
+}
+#endif /* CONFIG_IEEE80211BE */
 
 
 #ifdef CONFIG_IEEE80211R_AP
@@ -1806,6 +1832,9 @@ int hostapd_setup_wpa(struct hostapd_data *hapd)
 		.get_sta_count = hostapd_wpa_auth_get_sta_count,
 		.for_each_sta = hostapd_wpa_auth_for_each_sta,
 		.for_each_auth = hostapd_wpa_auth_for_each_auth,
+#ifdef CONFIG_IEEE80211BE
+		.for_each_partner_auth = hostapd_wpa_auth_for_each_partner_auth,
+#endif /* CONFIG_IEEE80211BE */
 		.send_ether = hostapd_wpa_auth_send_ether,
 		.send_oui = hostapd_wpa_auth_send_oui,
 		.channel_info = hostapd_channel_info,
