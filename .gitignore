@@ -12,3 +12,4 @@ build/
 compile_commands.json
 .cache
 Dockerfile
+TEAPV2_DRAFT_COMPARISON.md
