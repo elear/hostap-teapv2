@@ -11,5 +11,4 @@ build/
 # clangd commands and cache
 compile_commands.json
 .cache
-Dockerfile
 TEAPV2_DRAFT_COMPARISON.md
