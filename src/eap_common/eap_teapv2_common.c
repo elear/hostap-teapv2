@@ -418,11 +418,12 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 {
 	switch (tlv_type) {
 	case TEAPV2_TLV_IDENTITY_TYPE:
-		if (len < 2) {
+		if (len != 2) {
 			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Too short Identity-Type TLV");
+				   "EAP-TEAPV2: Invalid Identity-Type TLV length %zu (expected 2)",
+				   len);
 			tlv->result = TEAPV2_STATUS_FAILURE;
-			break;
+			return -2;
 		}
 		tlv->identity_type = WPA_GET_BE16(pos);
 		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Identity-Type: %u",
@@ -436,10 +437,12 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			tlv->result = TEAPV2_STATUS_FAILURE;
 			return -2;
 		}
-		if (len < 2) {
-			wpa_printf(MSG_INFO, "EAP-TEAPV2: Too short Result TLV");
+		if (len != 2) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Invalid Result TLV length %zu (expected 2)",
+				   len);
 			tlv->result = TEAPV2_STATUS_FAILURE;
-			break;
+			return -2;
 		}
 		tlv->result = WPA_GET_BE16(pos);
 		if (tlv->result != TEAPV2_STATUS_SUCCESS &&
@@ -508,11 +511,12 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 	case TEAPV2_TLV_INTERMEDIATE_RESULT:
 		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Intermediate-Result TLV",
 			    pos, len);
-		if (len < 2) {
+		if (len != 2) {
 			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Too short Intermediate-Result TLV");
+				   "EAP-TEAPV2: Invalid Intermediate-Result TLV length %zu (expected 2)",
+				   len);
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
-			break;
+			return -2;
 		}
 		if (tlv->iresult) {
 			wpa_printf(MSG_INFO,
@@ -542,9 +546,11 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			return -2;
 		}
 		tlv->crypto_binding_len = sizeof(struct teapv2_tlv_hdr) + len;
-		if (tlv->crypto_binding_len < sizeof(*tlv->crypto_binding)) {
+		if (tlv->crypto_binding_len != sizeof(*tlv->crypto_binding)) {
 			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Too short Crypto-Binding TLV");
+				   "EAP-TEAPV2: Invalid Crypto-Binding TLV length %zu (expected %zu)",
+				   len, sizeof(*tlv->crypto_binding) -
+				   sizeof(struct teapv2_tlv_hdr));
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
 			return -2;
 		}

@@ -1525,7 +1525,16 @@ def test_eap_teapv2_client_cert(dev, apdev):
         logger.info("EAP-TEAPV2 could not use session ticket")
         #raise Exception("EAP-TEAPV2 could not use session ticket")
 
-    # verify server accepts a client without certificate
+    # The omit-binding fault is AP-wide. Restart without it before verifying
+    # the fallback inner-EAP path, where Crypto-Binding is required.
+    dev[0].request("REMOVE_NETWORK all")
+    dev[0].wait_disconnected()
+    hostapd.remove_bss(apdev[0])
+    params = int_teapv2_server_params(eap_teapv2_auth="2")
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    # Verify the server accepts a client without a certificate by falling
+    # back to inner EAP-MSCHAPV2 with a valid Crypto-Binding exchange.
     eap_connect(dev[1], hapd, "TEAPV2", "user",
                 anonymous_identity="TEAPV2", password="password",
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
