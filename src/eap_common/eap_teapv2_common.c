@@ -76,13 +76,11 @@ int eap_teapv2_derive_eap_msk(const struct teapv2_round_seed *rs, u8 *msk)
 	 * MSK = first 64 octets of
 	 *       TLS-PRF(RoundSeed, "Session Key Generating Function")
 	 */
-	wpa_hexdump_key(MSG_INFO, "EAP-TEAPV2 DIAG: RoundSeed for MSK derivation",
-			(const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN);
 	if (tls_prf_sha256((const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN,
 			   "Session Key Generating Function", (u8 *) "", 0,
 			   msk, EAP_TEAPV2_KEY_LEN) < 0)
 		return -1;
-	wpa_hexdump_key(MSG_INFO, "EAP-TEAPV2 DIAG: Derived key (MSK)",
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Derived key (MSK)",
 			msk, EAP_TEAPV2_KEY_LEN);
 	return 0;
 }
@@ -142,7 +140,7 @@ int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
 		os_memcpy(rs->emsk, emsk, copy_len);
 	}
 
-	wpa_hexdump_key(MSG_INFO, "EAP-TEAPV2 DIAG: RoundSeed (before Exporter)",
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: RoundSeed",
 			(const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN);
 
 	if (tls_connection_export_key(tls_ctx, conn,
@@ -158,12 +156,12 @@ int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
 
 	os_memcpy(cmk, derived + EAP_TEAPV2_ROUNDKEY_LEN,
 		  EAP_TEAPV2_CMK_LEN);
-	wpa_hexdump_key(MSG_INFO, "EAP-TEAPV2 DIAG: CMK",
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: CMK",
 			cmk, EAP_TEAPV2_CMK_LEN);
 
 	/* Update RoundSeed for the next round (Section 3.3.3). */
 	os_memcpy(rs->prev_round_key, derived, EAP_TEAPV2_ROUNDKEY_LEN);
-	wpa_hexdump_key(MSG_INFO, "EAP-TEAPV2 DIAG: Updated PrevRoundKey",
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Updated PrevRoundKey",
 			rs->prev_round_key, EAP_TEAPV2_ROUNDKEY_LEN);
 
 	forced_memzero(derived, sizeof(derived));
