@@ -871,7 +871,7 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 
 					req = eap_teapv2_tlv_result(
 						TEAPV2_STATUS_SUCCESS, 0);
-					if (skipped_inner_cb) {
+					if (skipped_inner_cb && req) {
 						/* draft-ietf-emu-teapv2
 						 * Section 3.3: even when
 						 * inner EAP is skipped, the
@@ -880,6 +880,11 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 						 * it can advance its
 						 * RoundSeed in lock-step with
 						 * the server. */
+						if (wpabuf_resize(&req,
+								  sizeof(struct teapv2_tlv_crypto_binding)) < 0) {
+							wpabuf_free(req);
+							return NULL;
+						}
 						req = eap_teapv2_build_crypto_binding(
 							req, data);
 						eap_teapv2_state(data,
