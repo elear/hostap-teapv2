@@ -2562,6 +2562,12 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf,
 			     "eap_teapv2_test_omit_crypto_binding") == 0) {
 		bss->eap_teapv2_test_omit_crypto_binding = atoi(pos);
+	} else if (os_strcmp(buf,
+			     "eap_teapv2_test_invalid_crypto_binding") == 0) {
+		bss->eap_teapv2_test_invalid_crypto_binding = atoi(pos);
+	} else if (os_strcmp(buf, "eap_teapv2_test_tlv") == 0) {
+		os_free(bss->eap_teapv2_test_tlv);
+		bss->eap_teapv2_test_tlv = os_strdup(pos);
 #endif /* CONFIG_TESTING_OPTIONS */
 	} else if (os_strcmp(buf, "eap_teapv2_id") == 0) {
 		bss->eap_teapv2_id = atoi(pos);

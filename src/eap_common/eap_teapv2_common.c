@@ -132,6 +132,59 @@ int eap_teapv2_derive_eap_emsk(u16 tls_cs,
 }
 
 
+#ifdef CONFIG_TESTING_OPTIONS
+int eap_teapv2_test_final_key_vectors(void)
+{
+	static const struct {
+		u16 tls_cs;
+		const char *msk;
+		const char *emsk;
+	} vectors[] = {
+		{
+			0x1301,
+			"617be74620f24c09209da4726dcae72beeaf10c6887d2bd50d07adf73f778d0f"
+			"c82447aca8fb6d403afb165d2ff923afa2d0b91ae74b10d590e4c725095b15af",
+			"8ad475655376caee95dbb36648027fd0f877f8fa699a4651bbcaa6e9326ef833"
+			"12c1e7f35b6769ab9fa5e86527811996e007a30a9b3bc5742dd7c669dc6b2133"
+		},
+		{
+			0x1302,
+			"1ab84800f7379cbe27455d30f06504a47fd200687b32a290e7dd96a4f4527b56"
+			"263915e32f26b68f704c84c3e5b383508cc4648e7b0e5c54e619eae09cf4637d",
+			"83279854344a87bd3fc8eebcbcc0c25198f97b6a7c04fc219d6673128d663ddf"
+			"a2cc719f8473914cbd1ad4f29734c211cf0556d72cc380188723716a65248856"
+		}
+	};
+	struct teapv2_round_seed rs;
+	u8 msk[EAP_TEAPV2_KEY_LEN], emsk[EAP_EMSK_LEN];
+	u8 expected[EAP_TEAPV2_KEY_LEN];
+	size_t i;
+
+	for (i = 0; i < sizeof(rs); i++)
+		((u8 *) &rs)[i] = i;
+
+	for (i = 0; i < ARRAY_SIZE(vectors); i++) {
+		if (eap_teapv2_derive_eap_msk(vectors[i].tls_cs, &rs, msk) < 0 ||
+		    hexstr2bin(vectors[i].msk, expected, sizeof(expected)) < 0 ||
+		    os_memcmp_const(msk, expected, sizeof(msk)) != 0 ||
+		    eap_teapv2_derive_eap_emsk(vectors[i].tls_cs, &rs,
+					      emsk) < 0 ||
+		    hexstr2bin(vectors[i].emsk, expected, sizeof(expected)) < 0 ||
+		    os_memcmp_const(emsk, expected, sizeof(emsk)) != 0) {
+			wpa_printf(MSG_ERROR,
+				   "EAP-TEAPV2: Final-key vector failed for cipher suite 0x%04x",
+				   vectors[i].tls_cs);
+			return -1;
+		}
+	}
+
+	wpa_printf(MSG_INFO,
+		   "EAP-TEAPV2: SHA-256 and SHA-384 final-key vectors passed");
+	return 0;
+}
+#endif /* CONFIG_TESTING_OPTIONS */
+
+
 int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
 				struct teapv2_round_seed *rs,
 				const u8 *msk, size_t msk_len,

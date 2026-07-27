@@ -468,6 +468,8 @@ struct hostapd_bss_config {
 	int eap_teapv2_separate_result;
 	int eap_teapv2_test_allow_keyless_inner;
 	int eap_teapv2_test_omit_crypto_binding;
+	int eap_teapv2_test_invalid_crypto_binding;
+	char *eap_teapv2_test_tlv;
 	int eap_teapv2_id;
 	int eap_teapv2_method_sequence;
 	int eap_teapv2_request_action_pkcs10;

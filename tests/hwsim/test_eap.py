@@ -7,6 +7,7 @@
 import base64
 import logging
 import random
+import struct
 logger = logging.getLogger()
 
 import os
@@ -42,6 +43,8 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
                              eap_teapv2_separate_result=None,
                              eap_teapv2_test_allow_keyless_inner=None,
                              eap_teapv2_test_omit_crypto_binding=None,
+                             eap_teapv2_test_invalid_crypto_binding=None,
+                             eap_teapv2_test_tlv=None,
                              eap_teapv2_id=None,
                              eap_teapv2_method_sequence=None,
                              eap_teapv2_request_action_pkcs10=None,
@@ -60,6 +63,11 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
     if eap_teapv2_test_omit_crypto_binding is not None:
         params['eap_teapv2_test_omit_crypto_binding'] = \
             eap_teapv2_test_omit_crypto_binding
+    if eap_teapv2_test_invalid_crypto_binding is not None:
+        params['eap_teapv2_test_invalid_crypto_binding'] = \
+            eap_teapv2_test_invalid_crypto_binding
+    if eap_teapv2_test_tlv is not None:
+        params['eap_teapv2_test_tlv'] = eap_teapv2_test_tlv
     if eap_teapv2_id is not None:
         params['eap_teapv2_id'] = eap_teapv2_id
     if eap_teapv2_method_sequence is not None:
@@ -215,7 +223,7 @@ def test_eap_teap_eap_mschapv2(dev, apdev):
     eap_reauth(dev[0], "TEAP")
 
 def test_eap_teapv2_eap_mschapv2(dev, apdev):
-    """EAP-TEAPV2 with inner EAP-MSCHAPV2"""
+    """EAP-TEAPV2 inner EAP-MSCHAPV2 with valid Crypto-Binding"""
     check_eap_capa(dev[0], "TEAPV2")
     check_eap_capa(dev[0], "MSCHAPV2")
     params = int_teapv2_server_params()
@@ -608,9 +616,10 @@ def test_eap_teap_basic_password_auth(dev, apdev):
                 ca_cert="auth_serv/ca.pem")
 
 def test_eap_teapv2_basic_password_auth(dev, apdev):
-    """EAP-TEAPV2 with Basic-Password-Auth"""
+    """EAP-TEAPV2 Basic-Password-Auth without Crypto-Binding"""
     check_eap_capa(dev[0], "TEAPV2")
-    params = int_teapv2_server_params(eap_teapv2_auth="1")
+    params = int_teapv2_server_params(
+        eap_teapv2_auth="1", eap_teapv2_test_omit_crypto_binding="1")
     hapd = hostapd.add_ap(apdev[0], params)
     eap_connect(dev[0], hapd, "TEAPV2", "user",
                 anonymous_identity="TEAPV2", password="password",
@@ -1397,6 +1406,79 @@ def test_eap_teapv2_missing_crypto_binding(dev, apdev):
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2",
                 expect_failure=True)
 
+def test_eap_teapv2_invalid_crypto_binding(dev, apdev):
+    """EAP-TEAPV2 rejects an invalid MSK Compound MAC"""
+    check_eap_capa(dev[0], "TEAPV2")
+    check_eap_capa(dev[0], "MSCHAPV2")
+    params = int_teapv2_server_params(
+        eap_teapv2_test_invalid_crypto_binding="1")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2",
+                expect_failure=True)
+
+def test_eap_teapv2_session_id(dev, apdev):
+    """EAP-TEAPV2 Session-Id uses the TLS 1.3 Method-Id exporter"""
+    check_eap_capa(dev[0], "TEAPV2")
+    params = int_teapv2_server_params(eap_teapv2_auth="1")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem")
+    status = dev[0].get_status(extra="VERBOSE")
+    session_id = status.get("eap_session_id")
+    if session_id is None:
+        raise Exception("EAP Session-Id missing from STATUS-VERBOSE")
+    # One-octet EAP Type (experimental TEAPv2 type 250) plus the 64-octet
+    # EXPORTER_EAP_TLS_Method-Id output.
+    if len(session_id) != 130 or not session_id.startswith("fa"):
+        raise Exception("Unexpected EAP-TEAPV2 Session-Id: " + session_id)
+
+def test_eap_teapv2_final_key_vectors(dev, apdev):
+    """EAP-TEAPV2 SHA-256 and SHA-384 final MSK/EMSK vectors"""
+    check_eap_capa(dev[0], "TEAPV2")
+    params = int_teapv2_server_params(eap_teapv2_auth="1")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem",
+                phase1="teapv2_test_final_key_vectors=1")
+
+def test_eap_teapv2_fixed_tlv_length_boundaries(dev, apdev):
+    """EAP-TEAPV2 rejects short and overlong fixed-size TLVs"""
+    check_eap_capa(dev[0], "TEAPV2")
+
+    # (description, TLV type, malformed payload, separate Result exchange)
+    cases = [
+        ("Result short", 3, b"\x01", True),
+        ("Result overlong", 3, b"\x00\x01\x00", True),
+        ("Intermediate-Result short", 10, b"\x01", False),
+        ("Intermediate-Result overlong", 10, b"\x00\x01\x00", False),
+        ("Identity-Type short", 2, b"\x01", False),
+        ("Identity-Type overlong", 2, b"\x00\x01\x00", False),
+        ("Crypto-Binding short", 12, bytes(71), False),
+        ("Crypto-Binding overlong", 12, bytes(73), False),
+    ]
+
+    for desc, tlv_type, payload, separate_result in cases:
+        logger.info("Malformed fixed-size TLV case: " + desc)
+        tlv = struct.pack(">HH", 0x8000 | tlv_type, len(payload)) + payload
+        params = int_teapv2_server_params(
+            eap_teapv2_auth="2",
+            eap_teapv2_separate_result="1" if separate_result else "0",
+            eap_teapv2_test_tlv=tlv.hex())
+        hapd = hostapd.add_ap(apdev[0], params)
+        try:
+            eap_connect(dev[0], hapd, "TEAPV2", "user",
+                        anonymous_identity="TEAPV2",
+                        client_cert="auth_serv/user.pem",
+                        private_key="auth_serv/user.key",
+                        ca_cert="auth_serv/ca.pem", expect_failure=True)
+        finally:
+            dev[0].request("REMOVE_NETWORK all")
+            hostapd.remove_bss(apdev[0])
+
 def test_eap_teap_client_cert(dev, apdev):
     """EAP-TEAP with client certificate in Phase 1"""
     check_eap_capa(dev[0], "TEAP")
@@ -1423,9 +1505,10 @@ def test_eap_teap_client_cert(dev, apdev):
                 ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2")
 
 def test_eap_teapv2_client_cert(dev, apdev):
-    """EAP-TEAPV2 with client certificate in Phase 1"""
+    """EAP-TEAPV2 certificate-only authentication without Crypto-Binding"""
     check_eap_capa(dev[0], "TEAPV2")
-    params = int_teapv2_server_params(eap_teapv2_auth="2")
+    params = int_teapv2_server_params(
+        eap_teapv2_auth="2", eap_teapv2_test_omit_crypto_binding="1")
     hapd = hostapd.add_ap(apdev[0], params)
 
     # verify server accept a client with certificate, but no Phase 2

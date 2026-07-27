@@ -2101,6 +2101,7 @@ void eap_server_config_free(struct eap_config *cfg)
 	os_free(cfg->eap_fast_a_id_info);
 	os_free(cfg->eap_teapv2_trusted_server_root);
 	os_free(cfg->eap_teapv2_csrattrs);
+	os_free(cfg->eap_teapv2_test_tlv);
 	os_free(cfg->server_id);
 	os_free(cfg->server_cert);
 	os_free(cfg->private_key);

@@ -71,6 +71,9 @@ struct eap_teapv2_data {
 	bool pkcs10_expected;
 	struct wpabuf *trusted_server_root;
 	struct wpabuf *csr_attrs;
+#ifdef CONFIG_TESTING_OPTIONS
+	struct wpabuf *test_tlv;
+#endif /* CONFIG_TESTING_OPTIONS */
 };
 
 
@@ -407,6 +410,18 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 			return NULL;
 		}
 	}
+#ifdef CONFIG_TESTING_OPTIONS
+	if (sm->cfg->eap_teapv2_test_tlv) {
+		data->test_tlv =
+			wpabuf_parse_bin(sm->cfg->eap_teapv2_test_tlv);
+		if (!data->test_tlv) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Invalid test TLV");
+			eap_teapv2_reset(sm, data);
+			return NULL;
+		}
+	}
+#endif /* CONFIG_TESTING_OPTIONS */
 	data->cb_required = false;
 	return data;
 }
@@ -429,6 +444,9 @@ static void eap_teapv2_reset(struct eap_sm *sm, void *priv)
 	wpabuf_free(data->peer_outer_tlvs);
 	wpabuf_free(data->trusted_server_root);
 	wpabuf_free(data->csr_attrs);
+#ifdef CONFIG_TESTING_OPTIONS
+	wpabuf_free(data->test_tlv);
+#endif /* CONFIG_TESTING_OPTIONS */
 	os_free(data->identity);
 	forced_memzero(&data->round_seed, sizeof(data->round_seed));
 	forced_memzero(data->cmk, EAP_TEAPV2_CMK_LEN);
@@ -782,10 +800,35 @@ static struct wpabuf * eap_teapv2_result_maybe_crypto_binding(
 		data->cb_required = false;
 		if (!buf)
 			return NULL;
+#ifdef CONFIG_TESTING_OPTIONS
+		if (sm->cfg->eap_teapv2_test_invalid_crypto_binding) {
+			struct teapv2_tlv_crypto_binding *cb;
+
+			cb = (struct teapv2_tlv_crypto_binding *)
+				(wpabuf_mhead_u8(buf) + wpabuf_len(buf) -
+				 sizeof(*cb));
+			cb->msk_compound_mac[0] ^= 0x01;
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: TESTING - corrupt MSK Compound MAC");
+		}
+#endif /* CONFIG_TESTING_OPTIONS */
 	}
 	buf = eap_teapv2_add_trusted_server_root(data, buf);
 	buf = eap_teapv2_add_request_action(data, buf);
-	return eap_teapv2_add_pkcs7(data, buf);
+	buf = eap_teapv2_add_pkcs7(data, buf);
+#ifdef CONFIG_TESTING_OPTIONS
+	if (buf && data->test_tlv) {
+		if (wpabuf_resize(&buf, wpabuf_len(data->test_tlv)) < 0) {
+			wpabuf_free(buf);
+			return NULL;
+		}
+		wpa_hexdump_buf(MSG_INFO,
+				"EAP-TEAPV2: TESTING - append test TLV",
+				data->test_tlv);
+		wpabuf_put_buf(buf, data->test_tlv);
+	}
+#endif /* CONFIG_TESTING_OPTIONS */
+	return buf;
 }
 
 

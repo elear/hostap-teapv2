@@ -45,6 +45,7 @@ struct eap_teapv2_data {
 	size_t num_phase2_types;
 	int resuming; /* starting a resumed session */
 	int test_outer_tlvs;
+	int test_final_key_vectors;
 
 	u8 key_data[EAP_TEAPV2_KEY_LEN];
 	u8 *session_id;
@@ -690,6 +691,8 @@ static void eap_teapv2_parse_phase1(struct eap_teapv2_data *data,
 #ifdef CONFIG_TESTING_OPTIONS
 	if (os_strstr(phase1, "teapv2_test_outer_tlvs=1"))
 		data->test_outer_tlvs = 1;
+	if (os_strstr(phase1, "teapv2_test_final_key_vectors=1"))
+		data->test_final_key_vectors = 1;
 #endif /* CONFIG_TESTING_OPTIONS */
 }
 
@@ -709,6 +712,14 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 
 	if (config->phase1)
 		eap_teapv2_parse_phase1(data, config->phase1);
+
+#ifdef CONFIG_TESTING_OPTIONS
+	if (data->test_final_key_vectors &&
+	    eap_teapv2_test_final_key_vectors() < 0) {
+		eap_teapv2_deinit(sm, data);
+		return NULL;
+	}
+#endif /* CONFIG_TESTING_OPTIONS */
 
 	if (eap_peer_select_phase2_methods(config, "auth=",
 					   &data->phase2_types,

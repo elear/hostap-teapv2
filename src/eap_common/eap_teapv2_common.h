@@ -198,5 +198,8 @@ const char * eap_teapv2_tlv_type_str(enum teapv2_tlv_types type);
 struct wpabuf * eap_teapv2_tlv_result(int status, int intermediate);
 struct wpabuf * eap_teapv2_tlv_error(enum teapv2_error_codes error);
 struct wpabuf * eap_teapv2_tlv_identity_type(enum teapv2_identity_types id);
+#ifdef CONFIG_TESTING_OPTIONS
+int eap_teapv2_test_final_key_vectors(void);
+#endif /* CONFIG_TESTING_OPTIONS */
 
 #endif /* EAP_TEAPV2_H */
