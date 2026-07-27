@@ -1794,6 +1794,11 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 							data->cmk) < 0)
 				return -1;
 			data->round_idx++;
+			/* The peer must receive a Crypto-Binding TLV so that
+			 * it advances its RoundSeed in lock-step with the
+			 * server; without an inner method there is no other
+			 * trigger for cb_required to be set. */
+			data->cb_required = true;
 			eap_teapv2_state(data, CRYPTO_BINDING);
 			return 1;
 		} else if (sm->cfg->eap_teapv2_auth == 1) {

@@ -8,6 +8,7 @@ wpaspy/build
 **/*.rej
 tags
 build/
+tmp/
 # clangd commands and cache
 compile_commands.json
 .cache
