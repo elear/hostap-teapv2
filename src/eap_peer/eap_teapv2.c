@@ -778,9 +778,9 @@ static void eap_teapv2_deinit(struct eap_sm *sm, void *priv)
 
 static int eap_teapv2_derive_msk(struct eap_teapv2_data *data)
 {
-	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Derive MSK/EMSK (round=%d)",
+	wpa_printf(MSG_INFO, "EAP-TEAPV2 DIAG: peer Derive MSK/EMSK (round=%d)",
 		   data->round_idx);
-	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Final RoundSeed",
+	wpa_hexdump_key(MSG_INFO, "EAP-TEAPV2 DIAG: peer Final RoundSeed",
 			(const u8 *) &data->round_seed,
 			EAP_TEAPV2_ROUNDSEED_LEN);
 
@@ -810,8 +810,8 @@ static int eap_teapv2_derive_key_auth(struct eap_sm *sm,
 					EAP_TEAPV2_ROUNDKEY_LEN);
 	if (res)
 		return res;
-	wpa_hexdump_key(MSG_DEBUG,
-			"EAP-TEAPV2: session_key_seed (initial PrevRoundKey)",
+	wpa_hexdump_key(MSG_INFO,
+			"EAP-TEAPV2 DIAG: peer session_key_seed (initial PrevRoundKey)",
 			data->round_seed.prev_round_key,
 			EAP_TEAPV2_ROUNDKEY_LEN);
 	data->round_idx = 0;
@@ -1313,6 +1313,10 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 	int res;
 	size_t len;
 
+	wpa_printf(MSG_INFO,
+		   "EAP-TEAPV2 DIAG: peer process_crypto_binding entry round=%d phase2_method=%p phase2_success=%d",
+		   data->round_idx, data->phase2_method,
+		   data->phase2_success);
 	if (eap_teapv2_validate_crypto_binding(data, cb) < 0 ||
 	    eap_teapv2_get_cmk(sm, data) < 0)
 		return NULL;
@@ -1648,8 +1652,10 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	    eap_teapv2_derive_msk(data) == 0) {
 		/* Assume the server might accept authentication without going
 		 * through inner authentication. */
-		wpa_printf(MSG_DEBUG,
-			   "EAP-TEAPV2: Client certificate used - server may decide to skip inner authentication");
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2 DIAG: peer safety-net derive_msk (result_success_done=%d expect_cb=%d tlv.result=%d cert_used=1)",
+			   data->result_success_done, expect_crypto_binding,
+			   tlv.result);
 		data->client_authenticated = true;
 		ret->methodState = METHOD_MAY_CONT;
 		ret->decision = DECISION_COND_SUCC;

@@ -281,8 +281,8 @@ static int eap_teapv2_derive_key_auth(struct eap_sm *sm,
 					EAP_TEAPV2_ROUNDKEY_LEN);
 	if (res)
 		return res;
-	wpa_hexdump_key(MSG_DEBUG,
-			"EAP-TEAPV2: session_key_seed (initial PrevRoundKey)",
+	wpa_hexdump_key(MSG_INFO,
+			"EAP-TEAPV2 DIAG: server session_key_seed (initial PrevRoundKey)",
 			data->round_seed.prev_round_key,
 			EAP_TEAPV2_ROUNDKEY_LEN);
 	data->round_idx = 0;
@@ -865,10 +865,17 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 				wpa_printf(MSG_DEBUG,
 					   "EAP-TEAPV2: Try to start Phase 2");
 				res = eap_teapv2_process_phase2_start(sm, data);
+				wpa_printf(MSG_INFO,
+					   "EAP-TEAPV2 DIAG: server phase2_start res=%d state=%d(%s)",
+					   res, data->state,
+					   eap_teapv2_state_txt(data->state));
 				if (res == 1) {
 					bool skipped_inner_cb =
 						data->state == CRYPTO_BINDING;
 
+					wpa_printf(MSG_INFO,
+						   "EAP-TEAPV2 DIAG: piggyback path skipped_inner_cb=%d",
+						   skipped_inner_cb);
 					req = eap_teapv2_tlv_result(
 						TEAPV2_STATUS_SUCCESS, 0);
 					if (skipped_inner_cb && req) {
@@ -887,6 +894,10 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 						}
 						req = eap_teapv2_build_crypto_binding(
 							req, data);
+						wpa_printf(MSG_INFO,
+							   "EAP-TEAPV2 DIAG: piggyback CB emitted, req=%p len=%zu",
+							   req,
+							   req ? wpabuf_len(req) : 0);
 						eap_teapv2_state(data,
 								 SUCCESS_SEND_RESULT);
 					}
@@ -1771,6 +1782,9 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Used client certificate and identity already known - skip inner auth");
 			data->skipped_inner_auth = 1;
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2 DIAG: server skipped-inner-auth path, deriving RoundKey (round=%d)",
+				   data->round_idx);
 			/* draft-ietf-emu-teapv2 Section 3.3: no inner method
 			 * ran, so MSK/EMSK halves of the RoundSeed are zero. */
 			if (eap_teapv2_derive_round_key(sm->cfg->ssl_ctx,
@@ -1990,6 +2004,13 @@ static u8 * eap_teapv2_getKey(struct eap_sm *sm, void *priv, size_t *len)
 	if (!eapKeyData)
 		return NULL;
 
+	wpa_printf(MSG_INFO,
+		   "EAP-TEAPV2 DIAG: server getKey (round_idx=%d state=SUCCESS)",
+		   data->round_idx);
+	wpa_hexdump_key(MSG_INFO,
+			"EAP-TEAPV2 DIAG: server Final RoundSeed",
+			(const u8 *) &data->round_seed,
+			EAP_TEAPV2_ROUNDSEED_LEN);
 	if (eap_teapv2_derive_eap_msk(&data->round_seed, eapKeyData) < 0) {
 		os_free(eapKeyData);
 		wpa_printf(MSG_ERROR,"TEAPv2: could not derive MSK");
