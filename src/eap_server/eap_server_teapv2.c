@@ -864,34 +864,15 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 					   "EAP-TEAPV2: Try to start Phase 2");
 				res = eap_teapv2_process_phase2_start(sm, data);
 				if (res == 1) {
-					bool skipped_inner_cb =
-						data->state == CRYPTO_BINDING;
-
-					req = eap_teapv2_tlv_result(
-						TEAPV2_STATUS_SUCCESS, 0);
-					if (skipped_inner_cb && req) {
-						/* draft-ietf-emu-teapv2
-						 * Section 3.3: even when
-						 * inner EAP is skipped, the
-						 * peer must receive the
-						 * Crypto-Binding TLV so that
-						 * it can advance its
-						 * RoundSeed in lock-step with
-						 * the server. */
-						if (wpabuf_resize(&req,
-								  sizeof(struct teapv2_tlv_crypto_binding)) < 0) {
-							wpabuf_free(req);
-							return NULL;
-						}
-						req = eap_teapv2_build_crypto_binding(
-							req, data);
-						eap_teapv2_state(data,
-								 SUCCESS_SEND_RESULT);
-					}
-					req = eap_teapv2_add_request_action(
-						data, req);
-					req = eap_teapv2_add_pkcs7(data, req);
-					data->final_result = 1;
+					req =
+						eap_teapv2_result_maybe_crypto_binding(
+							sm, data);
+					if (!req)
+						return NULL;
+					if (data->final_result)
+						eap_teapv2_state(
+							data,
+							SUCCESS_SEND_RESULT);
 					piggyback = 1;
 					break;
 				}
@@ -1778,7 +1759,7 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 			 * and does not use RoundKey derivation or
 			 * Crypto-Binding. */
 			data->cb_required = false;
-			eap_teapv2_state(data, SUCCESS_SEND_RESULT);
+			eap_teapv2_state(data, CRYPTO_BINDING);
 			return 1;
 		} else if (sm->cfg->eap_teapv2_auth == 1) {
 			eap_teapv2_state(data, PHASE2_BASIC_AUTH);
