@@ -1342,6 +1342,10 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 			   "EAP-TEAPV2: MSK Compound MAC did not match");
 		return NULL;
 	}
+	wpa_printf(MSG_INFO,
+		   "EAP-TEAPV2 DIAG: peer CB MAC verified round=%d phase2_success=%d phase2_method=%p",
+		   data->round_idx, data->phase2_success,
+		   data->phase2_method);
 
 	/*
 	 * Compound MAC was valid, so authentication succeeded. Reply with

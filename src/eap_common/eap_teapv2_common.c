@@ -111,6 +111,8 @@ int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
 				const u8 *emsk, size_t emsk_len,
 				u8 *cmk)
 {
+	if (TEST_FAIL())
+		return -1;
 	/*
 	 * draft-ietf-emu-teapv2 Section 3.3.1 - 3.3.3:
 	 *
