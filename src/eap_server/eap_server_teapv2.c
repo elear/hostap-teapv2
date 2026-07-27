@@ -1385,8 +1385,10 @@ static int eap_teapv2_parse_tlvs(struct wpabuf *data,
 			   mandatory ? " (mandatory)" : "");
 
 		res = eap_teapv2_parse_tlv(tlv, tlv_type, pos, len);
-		if (res == -2)
+		if (res == -2) {
+			tlv->malformed = 1;
 			break;
+		}
 		if (res < 0) {
 			if (mandatory) {
 				wpa_printf(MSG_DEBUG,
@@ -1488,6 +1490,14 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 	if (eap_teapv2_parse_tlvs(in_data, &tlv) < 0) {
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Failed to parse received Phase 2 TLVs");
+		return;
+	}
+
+	if (tlv.malformed) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Reject malformed or duplicate TLV");
+		eap_teapv2_req_failure(
+			data, TEAPV2_ERROR_UNEXPECTED_TLVS_EXCHANGED);
 		return;
 	}
 

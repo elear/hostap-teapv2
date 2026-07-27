@@ -150,6 +150,7 @@ struct wpabuf;
 struct tls_connection;
 
 struct eap_teapv2_tlv_parse {
+	int malformed;
 	u8 *eap_payload_tlv;
 	size_t eap_payload_tlv_len;
 	struct teapv2_tlv_crypto_binding *crypto_binding;

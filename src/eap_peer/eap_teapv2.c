@@ -1412,8 +1412,10 @@ static int eap_teapv2_parse_decrypted(struct wpabuf *decrypted,
 			   mandatory ? " (mandatory)" : "");
 
 		res = eap_teapv2_parse_tlv(tlv, tlv_type, pos, len);
-		if (res == -2)
+		if (res == -2) {
+			tlv->malformed = 1;
 			break;
+		}
 		if (res < 0) {
 			if (mandatory) {
 				wpa_printf(MSG_DEBUG,
@@ -1458,6 +1460,14 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 	if (resp) {
 		/* Parsing rejected the message - send out an error response */
 		goto send_resp;
+	}
+
+	if (tlv.malformed) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Reject malformed or duplicate TLV");
+		failed = 1;
+		error = TEAPV2_ERROR_UNEXPECTED_TLVS_EXCHANGED;
+		goto done;
 	}
 
 	if (tlv.trusted_server_root)
