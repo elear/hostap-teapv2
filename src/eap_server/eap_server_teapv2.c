@@ -1330,6 +1330,11 @@ static void eap_teapv2_process_basic_auth_resp(struct eap_sm *sm,
 	    data->cur_id_type == TEAPV2_IDENTITY_TYPE_MACHINE)
 		data->basic_auth_not_done = 0;
 	if (data->basic_auth_not_done) {
+		/* USER_AND_MACHINE mode: prompt for the second identity.
+		 * The RoundKey chain must not advance between the two
+		 * Basic-Password-Auth prompts because only a single
+		 * Crypto-Binding TLV is emitted after both authentications
+		 * have completed. */
 		eap_teapv2_state(data, PHASE2_BASIC_AUTH);
 	} else {
 		/* Basic-Password-Auth complete: peer must receive a
@@ -1337,8 +1342,8 @@ static void eap_teapv2_process_basic_auth_resp(struct eap_sm *sm,
 		 * lock-step with the server before MSK/EMSK derivation. */
 		data->cb_required = true;
 		eap_teapv2_state(data, CRYPTO_BINDING);
+		eap_teapv2_update_icmk(sm, data);
 	}
-	eap_teapv2_update_icmk(sm, data);
 }
 
 
