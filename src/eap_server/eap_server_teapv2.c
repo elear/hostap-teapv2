@@ -1560,7 +1560,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 			return;
 		}
 
-		if (!data->inner_method_done) {
+		if (!data->inner_method_done && !data->skipped_inner_auth) {
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Unexpected Crypto-Binding TLV before successful inner EAP method completion");
 			eap_teapv2_state(data, FAILURE);
