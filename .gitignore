@@ -13,3 +13,5 @@ tmp/
 compile_commands.json
 .cache
 TEAPV2_DRAFT_COMPARISON.md
+TEAPV2_SECURITY_REVIEW.md
+TEAPV2_REMEDIATION_PLAN.md
