@@ -516,12 +516,14 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 				   "EAP-TEAPV2: Invalid Intermediate-Result TLV length %zu (expected 2)",
 				   len);
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			tlv->result = TEAPV2_STATUS_FAILURE;
 			return -2;
 		}
 		if (tlv->iresult) {
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: More than one Intermediate-Result TLV in the message");
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			tlv->result = TEAPV2_STATUS_FAILURE;
 			return -2;
 		}
 		tlv->iresult = WPA_GET_BE16(pos);
@@ -543,6 +545,7 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: More than one Crypto-Binding TLV in the message");
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			tlv->result = TEAPV2_STATUS_FAILURE;
 			return -2;
 		}
 		tlv->crypto_binding_len = sizeof(struct teapv2_tlv_hdr) + len;
@@ -552,6 +555,7 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 				   len, sizeof(*tlv->crypto_binding) -
 				   sizeof(struct teapv2_tlv_hdr));
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
+			tlv->result = TEAPV2_STATUS_FAILURE;
 			return -2;
 		}
 		tlv->crypto_binding = (struct teapv2_tlv_crypto_binding *)
