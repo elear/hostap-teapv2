@@ -866,14 +866,25 @@ static struct wpabuf * eap_teapv2_buildReq(struct eap_sm *sm, void *priv, u8 id)
 					   "EAP-TEAPV2: Try to start Phase 2");
 				res = eap_teapv2_process_phase2_start(sm, data);
 				if (res == 1) {
-					if (data->state == CRYPTO_BINDING) {
-						wpa_printf(MSG_DEBUG,
-							   "EAP-TEAPV2: Skip piggybacked Crypto-Binding after Phase 1 completion");
+					bool skipped_inner_cb =
+						data->state == CRYPTO_BINDING;
+
+					req = eap_teapv2_tlv_result(
+						TEAPV2_STATUS_SUCCESS, 0);
+					if (skipped_inner_cb) {
+						/* draft-ietf-emu-teapv2
+						 * Section 3.3: even when
+						 * inner EAP is skipped, the
+						 * peer must receive the
+						 * Crypto-Binding TLV so that
+						 * it can advance its
+						 * RoundSeed in lock-step with
+						 * the server. */
+						req = eap_teapv2_build_crypto_binding(
+							req, data);
 						eap_teapv2_state(data,
 								 SUCCESS_SEND_RESULT);
 					}
-					req = eap_teapv2_tlv_result(
-						TEAPV2_STATUS_SUCCESS, 0);
 					req = eap_teapv2_add_request_action(
 						data, req);
 					req = eap_teapv2_add_pkcs7(data, req);
