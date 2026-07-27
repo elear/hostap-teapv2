@@ -50,7 +50,6 @@ struct eap_teapv2_data {
 
 	u8 *srv_id;
 	size_t srv_id_len;
-	char *srv_id_info;
 
 	unsigned int basic_auth_not_done:1;
 	unsigned int inner_eap_not_done:1;
@@ -386,17 +385,6 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 		  sm->cfg->eap_fast_a_id_len);
 	data->srv_id_len = sm->cfg->eap_fast_a_id_len;
 
-	if (!sm->cfg->eap_fast_a_id_info) {
-		wpa_printf(MSG_INFO, "EAP-TEAPV2: No A-ID-Info configured");
-		eap_teapv2_reset(sm, data);
-		return NULL;
-	}
-	data->srv_id_info = os_strdup(sm->cfg->eap_fast_a_id_info);
-	if (!data->srv_id_info) {
-		eap_teapv2_reset(sm, data);
-		return NULL;
-	}
-
 	if (sm->cfg->eap_teapv2_trusted_server_root) {
 		data->trusted_server_root =
 			eap_teapv2_load_trusted_server_root(
@@ -432,7 +420,6 @@ static void eap_teapv2_reset(struct eap_sm *sm, void *priv)
 	wpabuf_free(data->pkcs7_cert);
 	wpabuf_free(data->pkcs10_csr);
 	os_free(data->srv_id);
-	os_free(data->srv_id_info);
 	wpabuf_free(data->pending_phase2_resp);
 	wpabuf_free(data->server_outer_tlvs);
 	wpabuf_free(data->peer_outer_tlvs);

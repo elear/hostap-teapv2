@@ -38,32 +38,9 @@
 #define TEAPV2_TLS_EXPORTER_LABEL_IMCK \
 	"EXPORTER: TEAPv2 Inner Methods Compound Keys"
 
-#define TLS_EXT_PAC_OPAQUE 35
-
-/*
- * RFC 7170: Section 4.2.12.1 - Formats for PAC Attributes
- * Note: bit 0x8000 (Mandatory) and bit 0x4000 (Reserved) are also defined
- * in the general TLV format (Section 4.2.1).
- */
-#define PAC_TYPE_PAC_KEY 1
-#define PAC_TYPE_PAC_OPAQUE 2
-#define PAC_TYPE_CRED_LIFETIME 3
-#define PAC_TYPE_A_ID 4
-#define PAC_TYPE_I_ID 5
-/* 6 - Reserved */
-#define PAC_TYPE_A_ID_INFO 7
-#define PAC_TYPE_PAC_ACKNOWLEDGEMENT 8
-#define PAC_TYPE_PAC_INFO 9
-#define PAC_TYPE_PAC_TYPE 10
-
 #ifdef _MSC_VER
 #pragma pack(push, 1)
 #endif /* _MSC_VER */
-
-struct pac_attr_hdr {
-	be16 type;
-	be16 len;
-} STRUCT_PACKED;
 
 struct teapv2_tlv_hdr {
 	be16 tlv_type;
@@ -106,33 +83,9 @@ struct teapv2_round_seed {
 	u8 emsk[EAP_TEAPV2_EMSK_HALF_LEN];
 } STRUCT_PACKED;
 
-struct teapv2_tlv_request_action {
-	be16 tlv_type;
-	be16 length;
-	u8 status;
-	u8 action;
-	/* followed by optional TLVs */
-} STRUCT_PACKED;
-
 enum teapv2_request_action {
 	TEAPV2_REQUEST_ACTION_PROCESS_TLV = 1,
-	TEAPV2_REQUEST_ACTION_NEGOTIATE_EAP = 2,
 };
-
-/* PAC TLV with PAC-Acknowledgement TLV attribute */
-struct teapv2_tlv_pac_ack {
-	be16 tlv_type;
-	be16 length;
-	be16 pac_type;
-	be16 pac_len;
-	be16 result;
-} STRUCT_PACKED;
-
-struct teapv2_attr_pac_type {
-	be16 type; /* PAC_TYPE_PAC_TYPE */
-	be16 length; /* 2 */
-	be16 pac_type;
-} STRUCT_PACKED;
 
 #ifdef _MSC_VER
 #pragma pack(pop)
@@ -141,18 +94,10 @@ struct teapv2_attr_pac_type {
 #define TEAPV2_CRYPTO_BINDING_SUBTYPE_REQUEST 0
 #define TEAPV2_CRYPTO_BINDING_SUBTYPE_RESPONSE 1
 
-#define TEAPV2_CRYPTO_BINDING_EMSK_CMAC 1
 #define TEAPV2_CRYPTO_BINDING_MSK_CMAC 2
-#define TEAPV2_CRYPTO_BINDING_EMSK_AND_MSK_CMAC 3
 
 
-#define EAP_TEAPV2_PAC_KEY_LEN 48
-
-/* RFC 7170: 4.2.12.6 PAC-Type TLV */
-#define PAC_TYPE_TUNNEL_PAC 1
-
-
-/* RFC 7170, 4.2.1: General TLV Format */
+/* draft-ietf-emu-teapv2 Section 4.2.1: General TLV Format */
 enum teapv2_tlv_types {
 	TEAPV2_TLV_AUTHORITY_ID = 1,
 	TEAPV2_TLV_IDENTITY_TYPE = 2,
@@ -164,7 +109,6 @@ enum teapv2_tlv_types {
 	TEAPV2_TLV_REQUEST_ACTION = 8,
 	TEAPV2_TLV_EAP_PAYLOAD = 9,
 	TEAPV2_TLV_INTERMEDIATE_RESULT = 10,
-	TEAPV2_TLV_PAC = 11,
 	TEAPV2_TLV_CRYPTO_BINDING = 12,
 	TEAPV2_TLV_BASIC_PASSWORD_AUTH_REQ = 13,
 	TEAPV2_TLV_BASIC_PASSWORD_AUTH_RESP = 14,
@@ -213,19 +157,12 @@ struct eap_teapv2_tlv_parse {
 	int iresult;
 	int result;
 	u8 *nak;
-	size_t nak_len;
 	u8 request_action;
-	u8 request_action_status;
 	u16 request_action_tlvs_type;
-	u8 *request_action_tlv;
-	size_t request_action_tlv_len;
-	u8 *pac;
-	size_t pac_len;
 	u8 *basic_auth_req;
 	size_t basic_auth_req_len;
 	u8 *basic_auth_resp;
 	size_t basic_auth_resp_len;
-	u32 error_code;
 	u16 identity_type;
 	u8 *pkcs10;
 	size_t pkcs10_len;
@@ -259,6 +196,5 @@ const char * eap_teapv2_tlv_type_str(enum teapv2_tlv_types type);
 struct wpabuf * eap_teapv2_tlv_result(int status, int intermediate);
 struct wpabuf * eap_teapv2_tlv_error(enum teapv2_error_codes error);
 struct wpabuf * eap_teapv2_tlv_identity_type(enum teapv2_identity_types id);
-enum eap_type;
 
 #endif /* EAP_TEAPV2_H */

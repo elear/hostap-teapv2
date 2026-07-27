@@ -16,9 +16,6 @@
 #include "eap_teapv2_common.h"
 
 
-static int tls_cipher_suite_mac_sha384(u16 cs);
-
-
 void eap_teapv2_put_tlv_hdr(struct wpabuf *buf, u16 type, u16 len)
 {
 	struct teapv2_tlv_hdr hdr;
@@ -378,7 +375,6 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			break;
 		}
 		tlv->nak = pos;
-		tlv->nak_len = len;
 		break;
 	case TEAPV2_TLV_ERROR:
 		if (len < 4) {
@@ -386,13 +382,13 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			tlv->result = TEAPV2_STATUS_FAILURE;
 			break;
 		}
-		tlv->error_code = WPA_GET_BE32(pos);
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Error: %u", tlv->error_code);
+		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Error: %u",
+			   WPA_GET_BE32(pos));
 		break;
 	case TEAPV2_TLV_REQUEST_ACTION:
 		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Request-Action TLV",
 			    pos, len);
-		if (tlv->request_action_tlv) {
+		if (tlv->request_action) {
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: More than one Request-Action TLV in the message");
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
@@ -404,16 +400,13 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 			tlv->iresult = TEAPV2_STATUS_FAILURE;
 			break;
 		}
-		tlv->request_action_status = pos[0];
 		tlv->request_action = pos[1];
 		if (len >= 4)
 			tlv->request_action_tlvs_type =
 				WPA_GET_BE16(pos + 2) & TEAPV2_TLV_TYPE_MASK;
-		tlv->request_action_tlv = pos;
-		tlv->request_action_tlv_len = len;
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Request-Action: Status=%u Action=%u",
-			   tlv->request_action_status, tlv->request_action);
+			   pos[0], tlv->request_action);
 		break;
 	case TEAPV2_TLV_EAP_PAYLOAD:
 		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: EAP-Payload TLV",
@@ -453,17 +446,6 @@ int eap_teapv2_parse_tlv(struct eap_teapv2_tlv_parse *tlv,
 		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Intermediate Result: %s",
 			   tlv->iresult == TEAPV2_STATUS_SUCCESS ?
 			   "Success" : "Failure");
-		break;
-	case TEAPV2_TLV_PAC:
-		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: PAC TLV", pos, len);
-		if (tlv->pac) {
-			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: More than one PAC TLV in the message");
-			tlv->iresult = TEAPV2_STATUS_FAILURE;
-			return -2;
-		}
-		tlv->pac = pos;
-		tlv->pac_len = len;
 		break;
 	case TEAPV2_TLV_CRYPTO_BINDING:
 		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Crypto-Binding TLV",
@@ -588,8 +570,6 @@ const char * eap_teapv2_tlv_type_str(enum teapv2_tlv_types type)
 		return "EAP-Payload";
 	case TEAPV2_TLV_INTERMEDIATE_RESULT:
 		return "Intermediate-Result";
-	case TEAPV2_TLV_PAC:
-		return "PAC";
 	case TEAPV2_TLV_CRYPTO_BINDING:
 		return "Crypto-Binding";
 	case TEAPV2_TLV_BASIC_PASSWORD_AUTH_REQ:
