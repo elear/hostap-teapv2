@@ -40,6 +40,8 @@ def int_teap_server_params(eap_teap_auth=None,
 
 def int_teapv2_server_params(eap_teapv2_auth=None,
                              eap_teapv2_separate_result=None,
+                             eap_teapv2_test_allow_keyless_inner=None,
+                             eap_teapv2_test_omit_crypto_binding=None,
                              eap_teapv2_id=None,
                              eap_teapv2_method_sequence=None,
                              eap_teapv2_request_action_pkcs10=None,
@@ -52,6 +54,12 @@ def int_teapv2_server_params(eap_teapv2_auth=None,
         params['eap_teapv2_auth'] = eap_teapv2_auth
     if eap_teapv2_separate_result is not None:
         params['eap_teapv2_separate_result'] = eap_teapv2_separate_result
+    if eap_teapv2_test_allow_keyless_inner is not None:
+        params['eap_teapv2_test_allow_keyless_inner'] = \
+            eap_teapv2_test_allow_keyless_inner
+    if eap_teapv2_test_omit_crypto_binding is not None:
+        params['eap_teapv2_test_omit_crypto_binding'] = \
+            eap_teapv2_test_omit_crypto_binding
     if eap_teapv2_id is not None:
         params['eap_teapv2_id'] = eap_teapv2_id
     if eap_teapv2_method_sequence is not None:
@@ -1124,17 +1132,13 @@ def test_eap_teap_tls_cs_sha384(dev, apdev):
     """EAP-TEAP with TLS cipher suite that uses SHA-384"""
     run_eap_teap_tls_cs(dev, apdev, "AES256-GCM-SHA384")
 
-def test_eap_teapv2_tls_cs_sha1(dev, apdev):
-    """EAP-TEAPV2 with TLS cipher suite that uses SHA-1"""
-    run_eap_teapv2_tls_cs(dev, apdev, "AES128-SHA")
-
 def test_eap_teapv2_tls_cs_sha256(dev, apdev):
-    """EAP-TEAPV2 with TLS cipher suite that uses SHA-256"""
-    run_eap_teapv2_tls_cs(dev, apdev, "AES128-SHA256")
+    """EAP-TEAPV2 with a TLS 1.3 SHA-256 cipher suite"""
+    run_eap_teapv2_tls_cs(dev, apdev, "TLS_AES_128_GCM_SHA256")
 
 def test_eap_teapv2_tls_cs_sha384(dev, apdev):
-    """EAP-TEAPV2 with TLS cipher suite that uses SHA-384"""
-    run_eap_teapv2_tls_cs(dev, apdev, "AES256-GCM-SHA384")
+    """EAP-TEAPV2 with a TLS 1.3 SHA-384 cipher suite"""
+    run_eap_teapv2_tls_cs(dev, apdev, "TLS_AES_256_GCM_SHA384")
 
 def run_eap_teap_tls_cs(dev, apdev, cipher):
     check_eap_capa(dev[0], "TEAP")
@@ -1154,11 +1158,21 @@ def run_eap_teapv2_tls_cs(dev, apdev, cipher):
     if not tls.startswith("OpenSSL") and not tls.startswith("wolfSSL"):
         raise HwsimSkip("TLS library not supported for TLS CS configuration: " + tls)
     params = int_teapv2_server_params(eap_teapv2_auth="1")
-    params['openssl_ciphers'] = cipher
+    if tls.startswith("wolfSSL"):
+        configured_cipher = {
+            "TLS_AES_128_GCM_SHA256": "TLS13-AES128-GCM-SHA256",
+            "TLS_AES_256_GCM_SHA384": "TLS13-AES256-GCM-SHA384"
+        }[cipher]
+    else:
+        configured_cipher = cipher
+    params['openssl_ciphers'] = configured_cipher
     hapd = hostapd.add_ap(apdev[0], params)
     eap_connect(dev[0], hapd, "TEAPV2", "user",
                 anonymous_identity="TEAPV2", password="password",
                 ca_cert="auth_serv/ca.pem")
+    negotiated = dev[0].get_status_field("EAP TLS cipher")
+    if negotiated != cipher:
+        raise Exception("Unexpected TLS cipher: " + str(negotiated))
 
 def wait_eap_proposed(dev, wait_trigger=None):
     ev = dev.wait_event(["CTRL-EVENT-EAP-PROPOSED-METHOD"], timeout=10)
@@ -1347,6 +1361,41 @@ def test_eap_teapv2_eap_vendor(dev, apdev):
     eap_connect(dev[0], hapd, "TEAPV2", "vendor-test-2",
                 anonymous_identity="TEAPV2",
                 ca_cert="auth_serv/ca.pem", phase2="auth=VENDOR-TEST")
+
+def test_eap_teapv2_eap_gtc_rejected(dev, apdev):
+    """EAP-TEAPV2 server rejects an inner method without MSK or EMSK"""
+    check_eap_capa(dev[0], "TEAPV2")
+    check_eap_capa(dev[0], "GTC")
+    params = int_teapv2_server_params()
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem", phase2="auth=GTC",
+                expect_failure=True)
+
+def test_eap_teapv2_peer_rejects_eap_gtc(dev, apdev):
+    """EAP-TEAPV2 peer rejects an inner method without MSK or EMSK"""
+    check_eap_capa(dev[0], "TEAPV2")
+    check_eap_capa(dev[0], "GTC")
+    params = int_teapv2_server_params(
+        eap_teapv2_test_allow_keyless_inner="1")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem", phase2="auth=GTC",
+                expect_failure=True)
+
+def test_eap_teapv2_missing_crypto_binding(dev, apdev):
+    """EAP-TEAPV2 rejects omitted Crypto-Binding after inner EAP"""
+    check_eap_capa(dev[0], "TEAPV2")
+    check_eap_capa(dev[0], "MSCHAPV2")
+    params = int_teapv2_server_params(
+        eap_teapv2_test_omit_crypto_binding="1")
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "TEAPV2", "user",
+                anonymous_identity="TEAPV2", password="password",
+                ca_cert="auth_serv/ca.pem", phase2="auth=MSCHAPV2",
+                expect_failure=True)
 
 def test_eap_teap_client_cert(dev, apdev):
     """EAP-TEAP with client certificate in Phase 1"""

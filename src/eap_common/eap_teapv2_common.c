@@ -16,6 +16,10 @@
 #include "eap_teapv2_common.h"
 
 
+static int tls_cipher_suite_mac_sha256(u16 cs);
+static int tls_cipher_suite_mac_sha384(u16 cs);
+
+
 void eap_teapv2_put_tlv_hdr(struct wpabuf *buf, u16 type, u16 len)
 {
 	struct teapv2_tlv_hdr hdr;
@@ -66,16 +70,42 @@ struct wpabuf * eap_teapv2_tlv_eap_payload(struct wpabuf *buf)
 }
 
 
-int eap_teapv2_derive_eap_msk(const struct teapv2_round_seed *rs, u8 *msk)
+static int eap_teapv2_tls_prf(u16 tls_cs, const u8 *secret,
+			      size_t secret_len, const char *label,
+			      u8 *out, size_t out_len)
+{
+	/*
+	 * draft-ietf-emu-teapv2-00 calls this construction TLS-PRF without
+	 * otherwise defining it for TLS 1.3. Follow the established TEAP
+	 * interpretation and select P_SHA256 or P_SHA384 from the negotiated
+	 * TLS cipher suite.
+	 */
+	if (tls_cipher_suite_mac_sha384(tls_cs))
+		return tls_prf_sha384(secret, secret_len, label, (u8 *) "", 0,
+				      out, out_len);
+	if (tls_cipher_suite_mac_sha256(tls_cs))
+		return tls_prf_sha256(secret, secret_len, label, (u8 *) "", 0,
+				      out, out_len);
+
+	wpa_printf(MSG_INFO,
+		   "EAP-TEAPV2: Unsupported TLS cipher suite 0x%04x for final key derivation",
+		   tls_cs);
+	return -1;
+}
+
+
+int eap_teapv2_derive_eap_msk(u16 tls_cs,
+			      const struct teapv2_round_seed *rs, u8 *msk)
 {
 	/*
 	 * draft-ietf-emu-teapv2 Section 3.5:
 	 * MSK = first 64 octets of
 	 *       TLS-PRF(RoundSeed, "Session Key Generating Function")
 	 */
-	if (tls_prf_sha256((const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN,
-			   "Session Key Generating Function", (u8 *) "", 0,
-			   msk, EAP_TEAPV2_KEY_LEN) < 0)
+	if (eap_teapv2_tls_prf(tls_cs, (const u8 *) rs,
+				EAP_TEAPV2_ROUNDSEED_LEN,
+				"Session Key Generating Function",
+				msk, EAP_TEAPV2_KEY_LEN) < 0)
 		return -1;
 	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Derived key (MSK)",
 			msk, EAP_TEAPV2_KEY_LEN);
@@ -83,16 +113,18 @@ int eap_teapv2_derive_eap_msk(const struct teapv2_round_seed *rs, u8 *msk)
 }
 
 
-int eap_teapv2_derive_eap_emsk(const struct teapv2_round_seed *rs, u8 *emsk)
+int eap_teapv2_derive_eap_emsk(u16 tls_cs,
+			       const struct teapv2_round_seed *rs, u8 *emsk)
 {
 	/*
 	 * draft-ietf-emu-teapv2 Section 3.5:
 	 * EMSK = first 64 octets of
 	 *        TLS-PRF(RoundSeed, "Extended Session Key Generating Function")
 	 */
-	if (tls_prf_sha256((const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN,
-			   "Extended Session Key Generating Function",
-			   (u8 *) "", 0, emsk, EAP_EMSK_LEN) < 0)
+	if (eap_teapv2_tls_prf(tls_cs, (const u8 *) rs,
+				EAP_TEAPV2_ROUNDSEED_LEN,
+				"Extended Session Key Generating Function",
+				emsk, EAP_EMSK_LEN) < 0)
 		return -1;
 	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Derived key (EMSK)",
 			emsk, EAP_EMSK_LEN);

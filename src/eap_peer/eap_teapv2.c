@@ -61,6 +61,7 @@ struct eap_teapv2_data {
 	bool pkcs10_requested;
 	bool pkcs7_success;
 	bool cb_required;
+	bool inner_method_keyless;
 	bool client_authenticated;
 	struct wpabuf *csr_attrs;
 
@@ -756,7 +757,7 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	forced_memzero(data->cmk, EAP_TEAPV2_CMK_LEN);
 	data->pkcs7_success = false;
 	data->client_authenticated = false;
-	data->cb_required = true;
+	data->cb_required = false;
 }
 
 
@@ -784,9 +785,9 @@ static int eap_teapv2_derive_msk(struct eap_teapv2_data *data)
 			(const u8 *) &data->round_seed,
 			EAP_TEAPV2_ROUNDSEED_LEN);
 
-	if (eap_teapv2_derive_eap_msk(&data->round_seed,
+	if (eap_teapv2_derive_eap_msk(data->tls_cs, &data->round_seed,
 				      data->key_data) < 0 ||
-	    eap_teapv2_derive_eap_emsk(&data->round_seed,
+	    eap_teapv2_derive_eap_emsk(data->tls_cs, &data->round_seed,
 				       data->emsk) < 0)
 		return -1;
 	data->success = 1;
@@ -1003,6 +1004,8 @@ static int eap_teapv2_phase2_request(struct eap_sm *sm,
 		   (iret.decision == DECISION_UNCOND_SUCC ||
 		    iret.decision == DECISION_COND_SUCC)) {
 		data->phase2_success = 1;
+		if (iret.methodState == METHOD_DONE)
+			data->cb_required = true;
 	}
 
 	if (!(*resp) && config &&
@@ -1130,12 +1133,11 @@ static struct wpabuf * eap_teapv2_process_basic_auth_req(
 	if (req_id_type)
 		resp = eap_teapv2_add_identity_type(sm, resp);
 
-	/* Assume this succeeds so that Result TLV(Success) from the server can
-	 * be used to terminate TEAPV2. Do not clear cb_required here: TEAPv2
-	 * always requires a Crypto-Binding TLV from the server before MSK/EMSK
-	 * derivation so that both endpoints advance the RoundKey chain in
-	 * lock-step. */
+	/* Basic-Password-Auth is a non-EAP exchange. It can be terminated by a
+	 * Result TLV(Success), but it neither advances the RoundKey chain nor
+	 * uses Crypto-Binding. */
 	data->phase2_success = 1;
+	data->cb_required = false;
 
 	return resp;
 }
@@ -1232,9 +1234,12 @@ static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data)
 	wpa_printf(MSG_DEBUG,
 		   "EAP-TEAPV2: Determining RoundKey/CMK for inner round %d",
 		   data->round_idx + 1);
+	data->inner_method_keyless = false;
 
-	if (!data->phase2_method)
-		goto out; /* no MSK derived in Basic-Password-Auth */
+	if (!data->phase2_method) {
+		wpa_printf(MSG_INFO, "EAP-TEAPV2: No inner EAP method");
+		return -1;
+	}
 
 	if (!data->phase2_priv) {
 		wpa_printf(MSG_INFO, "EAP-TEAPV2: Phase 2 method not available");
@@ -1242,30 +1247,34 @@ static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data)
 	}
 
 	if (data->phase2_method->isKeyAvailable &&
-	    !data->phase2_method->isKeyAvailable(sm, data->phase2_priv)) {
+	    !data->phase2_method->isKeyAvailable(sm, data->phase2_priv) &&
+	    !data->phase2_method->get_emsk) {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Phase 2 key material not available");
 		return -1;
 	}
 
-	if (data->phase2_method->isKeyAvailable &&
-	    data->phase2_method->getKey) {
+	if (data->phase2_method->getKey &&
+	    (!data->phase2_method->isKeyAvailable ||
+	     data->phase2_method->isKeyAvailable(sm, data->phase2_priv))) {
 		msk = data->phase2_method->getKey(sm, data->phase2_priv,
 						  &msk_len);
-		if (!msk) {
-			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Could not fetch Phase 2 MSK");
-			return -1;
-		}
 	}
 
-	if (data->phase2_method->isKeyAvailable &&
-	    data->phase2_method->get_emsk) {
+	if (data->phase2_method->get_emsk) {
 		emsk = data->phase2_method->get_emsk(sm, data->phase2_priv,
 						     &emsk_len);
 	}
 
-out:
+	if ((!msk || !msk_len) && (!emsk || !emsk_len)) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: Inner EAP method did not derive an MSK or EMSK");
+		data->inner_method_keyless = true;
+		bin_clear_free(msk, msk_len);
+		bin_clear_free(emsk, emsk_len);
+		return -1;
+	}
+
 	res = eap_teapv2_update_icmk(sm, data, msk, msk_len, emsk, emsk_len);
 	bin_clear_free(msk, msk_len);
 	bin_clear_free(emsk, emsk_len);
@@ -1276,28 +1285,14 @@ out:
 static int eap_teapv2_session_id(struct eap_sm *sm,
 				 struct eap_teapv2_data *data)
 {
-	const size_t max_id_len = 65;
-
 	os_free(data->session_id);
-	data->session_id = os_malloc(max_id_len);
-	if (!data->session_id)
-		return -1;
-
-	data->session_id[0] = EAP_TYPE_TEAPV2;
-	/* draft-ietf-emu-teapv2: Session-Id is derived from a TLS exporter so
-	 * that it works with TLS 1.3 (where tls-unique is not defined). */
-	if (tls_connection_export_key(sm->ssl_ctx, data->ssl.conn,
-				      "EXPORTER: teap session id",
-				      NULL, 0,
-				      data->session_id + 1,
-				      max_id_len - 1) < 0) {
-		os_free(data->session_id);
-		data->session_id = NULL;
+	data->session_id = eap_peer_tls_derive_session_id(
+		sm, &data->ssl, EAP_TYPE_TEAPV2, &data->id_len);
+	if (!data->session_id) {
 		wpa_printf(MSG_ERROR, "EAP-TEAPV2: Failed to derive Session-Id");
 		return -1;
 	}
 
-	data->id_len = max_id_len;
 	wpa_hexdump(MSG_DEBUG, "EAP-TEAPV2: Derived Session-Id",
 		    data->session_id, data->id_len);
 	return 0;
@@ -1369,6 +1364,7 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 		wpabuf_free(resp);
 		return NULL;
 	}
+	data->cb_required = false;
 
 	return resp;
 }
@@ -1518,7 +1514,9 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 						      tlv.crypto_binding_len);
 		if (!tmp) {
 			failed = 1;
-			error = TEAPV2_ERROR_TUNNEL_COMPROMISE_ERROR;
+			error = data->inner_method_keyless ?
+				TEAPV2_ERROR_INNER_METHOD :
+				TEAPV2_ERROR_TUNNEL_COMPROMISE_ERROR;
 		} else {
 			resp = wpabuf_concat(resp, tmp);
 			if (tlv.result == TEAPV2_STATUS_SUCCESS && !failed)
@@ -1641,7 +1639,7 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		}
 	}
 
-	if ((data->result_success_done || (!expect_crypto_binding && tlv.result == TEAPV2_STATUS_SUCCESS)) &&
+	if (!data->cb_required && tlv.result == TEAPV2_STATUS_SUCCESS &&
 	    tls_connection_get_own_cert_used(data->ssl.conn) &&
 	    eap_teapv2_derive_msk(data) == 0) {
 		/* Assume the server might accept authentication without going
@@ -1679,24 +1677,24 @@ done:
 		resp = wpabuf_concat(tmp, resp);
 	}
 
-	if (resp && ((tlv.result == TEAPV2_STATUS_SUCCESS && !failed &&
-	    (tlv.crypto_binding || data->iresult_verified ||
-	     !data->cb_required) &&
-	    data->phase2_success) || (data->pkcs7_success || data->client_authenticated))) {
+	if (resp && !failed &&
+	    ((tlv.result == TEAPV2_STATUS_SUCCESS &&
+	      data->phase2_success &&
+	      ((!data->cb_required && !data->inner_method_done) ||
+	       data->iresult_verified)) ||
+	     data->pkcs7_success || data->client_authenticated)) {
 		/* Successfully completed Phase 2 */
 		wpa_printf(MSG_DEBUG,
 			   "EAP-TEAPV2: Authentication completed successfully");
 		ret->methodState = METHOD_MAY_CONT;
 		data->on_tx_completion = METHOD_DONE;
 		ret->decision = DECISION_UNCOND_SUCC;
-		if (! data->cb_required ) {
-			if (eap_teapv2_derive_msk(data) < 0 ||
-					eap_teapv2_session_id(sm, data) < 0) {
-					wpa_printf(MSG_INFO,
-					"EAP-TEAPV2: Failed to derive keys");
-					failed = 1;
-					goto done;
-					}
+		if ((!data->success && eap_teapv2_derive_msk(data) < 0) ||
+		    (!data->session_id && eap_teapv2_session_id(sm, data) < 0)) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Failed to derive keys");
+			failed = 1;
+			goto done;
 		}
 	}
 

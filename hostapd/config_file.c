@@ -2555,6 +2555,14 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		bss->eap_teapv2_auth = val;
 	} else if (os_strcmp(buf, "eap_teapv2_separate_result") == 0) {
 		bss->eap_teapv2_separate_result = atoi(pos);
+#ifdef CONFIG_TESTING_OPTIONS
+	} else if (os_strcmp(buf,
+			     "eap_teapv2_test_allow_keyless_inner") == 0) {
+		bss->eap_teapv2_test_allow_keyless_inner = atoi(pos);
+	} else if (os_strcmp(buf,
+			     "eap_teapv2_test_omit_crypto_binding") == 0) {
+		bss->eap_teapv2_test_omit_crypto_binding = atoi(pos);
+#endif /* CONFIG_TESTING_OPTIONS */
 	} else if (os_strcmp(buf, "eap_teapv2_id") == 0) {
 		bss->eap_teapv2_id = atoi(pos);
 	} else if (os_strcmp(buf, "eap_teapv2_method_sequence") == 0) {

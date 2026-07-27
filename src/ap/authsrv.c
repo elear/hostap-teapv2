@@ -336,6 +336,10 @@ static struct eap_config * authsrv_eap_config(struct hostapd_data *hapd)
 	cfg->eap_teap_method_sequence = hapd->conf->eap_teap_method_sequence;
 	cfg->eap_teapv2_auth = hapd->conf->eap_teapv2_auth;
 	cfg->eap_teapv2_separate_result = hapd->conf->eap_teapv2_separate_result;
+	cfg->eap_teapv2_test_allow_keyless_inner =
+		hapd->conf->eap_teapv2_test_allow_keyless_inner;
+	cfg->eap_teapv2_test_omit_crypto_binding =
+		hapd->conf->eap_teapv2_test_omit_crypto_binding;
 	cfg->eap_teapv2_id = hapd->conf->eap_teapv2_id;
 	cfg->eap_teapv2_method_sequence =
 		hapd->conf->eap_teapv2_method_sequence;

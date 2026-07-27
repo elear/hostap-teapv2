@@ -179,8 +179,10 @@ void eap_teapv2_put_tlv(struct wpabuf *buf, u16 type, const void *data, u16 len)
 void eap_teapv2_put_tlv_buf(struct wpabuf *buf, u16 type,
 			  const struct wpabuf *data);
 struct wpabuf * eap_teapv2_tlv_eap_payload(struct wpabuf *buf);
-int eap_teapv2_derive_eap_msk(const struct teapv2_round_seed *rs, u8 *msk);
-int eap_teapv2_derive_eap_emsk(const struct teapv2_round_seed *rs, u8 *emsk);
+int eap_teapv2_derive_eap_msk(u16 tls_cs,
+			      const struct teapv2_round_seed *rs, u8 *msk);
+int eap_teapv2_derive_eap_emsk(u16 tls_cs,
+			       const struct teapv2_round_seed *rs, u8 *emsk);
 int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
 				struct teapv2_round_seed *rs,
 				const u8 *msk, size_t msk_len,

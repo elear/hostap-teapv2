@@ -53,7 +53,6 @@ struct eap_teapv2_data {
 
 	unsigned int basic_auth_not_done:1;
 	unsigned int inner_eap_not_done:1;
-	int skipped_inner_auth;
 	bool inner_method_done;
 	struct wpabuf *pending_phase2_resp;
 	struct wpabuf *server_outer_tlvs;
@@ -259,6 +258,7 @@ static void eap_teapv2_state(struct eap_teapv2_data *data, int state)
 static enum eap_type eap_teapv2_req_failure(struct eap_teapv2_data *data,
 					  enum teapv2_error_codes error)
 {
+	data->error_code = error;
 	eap_teapv2_state(data, FAILURE_SEND_RESULT);
 	return EAP_TYPE_NONE;
 }
@@ -295,17 +295,11 @@ static int eap_teapv2_update_icmk(struct eap_sm *sm, struct eap_teapv2_data *dat
 	size_t msk_len = 0, emsk_len = 0;
 	int res;
 
-	/* draft-ietf-emu-teapv2 Section 3.1: Crypto-Binding TLVs are only
-	 * emitted after an inner EAP method has completed.  When
-	 * Basic-Password-Auth is used no MSK/EMSK is available, but a
-	 * RoundKey/CMK is still derived from the RoundSeed with MSK and EMSK
-	 * halves set to zero. */
+	/* Crypto-Binding and RoundKey derivation are only used after a
+	 * successful inner EAP method. */
 	wpa_printf(MSG_DEBUG,
 		   "EAP-TEAPV2: Deriving RoundKey/CMK for inner round %d",
 		   data->round_idx + 1);
-
-	if (sm->cfg->eap_teapv2_auth == 1)
-		goto out; /* no MSK derived in Basic-Password-Auth */
 
 	if (!data->phase2_method || !data->phase2_priv) {
 		wpa_printf(MSG_INFO, "EAP-TEAPV2: Phase 2 method not available");
@@ -315,11 +309,6 @@ static int eap_teapv2_update_icmk(struct eap_sm *sm, struct eap_teapv2_data *dat
 	if (data->phase2_method->getKey) {
 		msk = data->phase2_method->getKey(sm, data->phase2_priv,
 						  &msk_len);
-		if (!msk) {
-			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Could not fetch Phase 2 MSK");
-			return -1;
-		}
 	}
 
 	if (data->phase2_method->get_emsk) {
@@ -327,7 +316,22 @@ static int eap_teapv2_update_icmk(struct eap_sm *sm, struct eap_teapv2_data *dat
 						     &emsk_len);
 	}
 
-out:
+	if ((!msk || !msk_len) && (!emsk || !emsk_len)) {
+#ifdef CONFIG_TESTING_OPTIONS
+		if (sm->cfg->eap_teapv2_test_allow_keyless_inner) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: TESTING - derive RoundKey with no inner MSK or EMSK");
+		} else
+#endif /* CONFIG_TESTING_OPTIONS */
+		{
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: Inner EAP method did not derive an MSK or EMSK");
+			bin_clear_free(msk, msk_len);
+			bin_clear_free(emsk, emsk_len);
+			return -1;
+		}
+	}
+
 	res = eap_teapv2_derive_round_key(sm->cfg->ssl_ctx, data->ssl.conn,
 					  &data->round_seed,
 					  msk, msk_len, emsk, emsk_len,
@@ -767,9 +771,16 @@ static struct wpabuf * eap_teapv2_result_maybe_crypto_binding(
 	}
 
 	if (data->cb_required) {
-		buf=eap_teapv2_build_crypto_binding(buf, data);
+#ifdef CONFIG_TESTING_OPTIONS
+		if (sm->cfg->eap_teapv2_test_omit_crypto_binding) {
+			wpa_printf(MSG_INFO,
+				   "EAP-TEAPV2: TESTING - omit required Crypto-Binding TLV");
+			data->check_crypto_binding = false;
+		} else
+#endif /* CONFIG_TESTING_OPTIONS */
+		buf = eap_teapv2_build_crypto_binding(buf, data);
 		data->cb_required = false;
-		if (buf == NULL)
+		if (!buf)
 			return NULL;
 	}
 	buf = eap_teapv2_add_trusted_server_root(data, buf);
@@ -1136,7 +1147,11 @@ static void eap_teapv2_process_phase2_response(struct eap_sm *sm,
 		break;
 	case PHASE2_METHOD:
 	case CRYPTO_BINDING:
-		eap_teapv2_update_icmk(sm, data);
+		if (eap_teapv2_update_icmk(sm, data) < 0) {
+			eap_teapv2_req_failure(data,
+						 TEAPV2_ERROR_INNER_METHOD);
+			return;
+		}
 		if (data->state == PHASE2_METHOD &&
 		    (sm->cfg->eap_teapv2_id !=
 		     EAP_TEAPV2_ID_REQUIRE_USER_AND_MACHINE ||
@@ -1306,19 +1321,13 @@ static void eap_teapv2_process_basic_auth_resp(struct eap_sm *sm,
 	    data->cur_id_type == TEAPV2_IDENTITY_TYPE_MACHINE)
 		data->basic_auth_not_done = 0;
 	if (data->basic_auth_not_done) {
-		/* USER_AND_MACHINE mode: prompt for the second identity.
-		 * The RoundKey chain must not advance between the two
-		 * Basic-Password-Auth prompts because only a single
-		 * Crypto-Binding TLV is emitted after both authentications
-		 * have completed. */
+		/* USER_AND_MACHINE mode: prompt for the second identity. */
 		eap_teapv2_state(data, PHASE2_BASIC_AUTH);
 	} else {
-		/* Basic-Password-Auth complete: peer must receive a
-		 * Crypto-Binding TLV so that its RoundKey chain advances in
-		 * lock-step with the server before MSK/EMSK derivation. */
-		data->cb_required = true;
-		eap_teapv2_state(data, CRYPTO_BINDING);
-		eap_teapv2_update_icmk(sm, data);
+		/* Basic-Password-Auth is a non-EAP exchange and does not use
+		 * RoundKey derivation or Crypto-Binding. */
+		data->cb_required = false;
+		eap_teapv2_state(data, SUCCESS_SEND_RESULT);
 	}
 }
 
@@ -1546,9 +1555,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 			return;
 		}
 
-		if (!data->inner_method_done && !data->skipped_inner_auth &&
-		    !(sm->cfg->eap_teapv2_auth == 1 &&
-		      !data->basic_auth_not_done)) {
+		if (!data->inner_method_done) {
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Unexpected Crypto-Binding TLV before successful inner EAP method completion");
 			eap_teapv2_state(data, FAILURE);
@@ -1563,9 +1570,7 @@ static void eap_teapv2_process_phase2_tlvs(struct eap_sm *sm,
 			return;
 		}
 
-		if (sm->cfg->eap_teapv2_auth != 1 &&
-		    !data->skipped_inner_auth &&
-		    tlv.iresult != TEAPV2_STATUS_SUCCESS) {
+		if (tlv.iresult != TEAPV2_STATUS_SUCCESS) {
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Crypto-Binding TLV without intermediate Success Result");
 			eap_teapv2_state(data, FAILURE);
@@ -1769,22 +1774,11 @@ static int eap_teapv2_process_phase2_start(struct eap_sm *sm,
 		} else if (sm->cfg->eap_teapv2_auth == 2) {
 			wpa_printf(MSG_DEBUG,
 				   "EAP-TEAPV2: Used client certificate and identity already known - skip inner auth");
-			data->skipped_inner_auth = 1;
-			/* draft-ietf-emu-teapv2 Section 3.3: no inner method
-			 * ran, so MSK/EMSK halves of the RoundSeed are zero. */
-			if (eap_teapv2_derive_round_key(sm->cfg->ssl_ctx,
-							data->ssl.conn,
-							&data->round_seed,
-							NULL, 0, NULL, 0,
-							data->cmk) < 0)
-				return -1;
-			data->round_idx++;
-			/* The peer must receive a Crypto-Binding TLV so that
-			 * it advances its RoundSeed in lock-step with the
-			 * server; without an inner method there is no other
-			 * trigger for cb_required to be set. */
-			data->cb_required = true;
-			eap_teapv2_state(data, CRYPTO_BINDING);
+			/* Certificate-only authentication is a non-EAP exchange
+			 * and does not use RoundKey derivation or
+			 * Crypto-Binding. */
+			data->cb_required = false;
+			eap_teapv2_state(data, SUCCESS_SEND_RESULT);
 			return 1;
 		} else if (sm->cfg->eap_teapv2_auth == 1) {
 			eap_teapv2_state(data, PHASE2_BASIC_AUTH);
@@ -1994,7 +1988,8 @@ static u8 * eap_teapv2_getKey(struct eap_sm *sm, void *priv, size_t *len)
 	if (!eapKeyData)
 		return NULL;
 
-	if (eap_teapv2_derive_eap_msk(&data->round_seed, eapKeyData) < 0) {
+	if (eap_teapv2_derive_eap_msk(data->tls_cs, &data->round_seed,
+				      eapKeyData) < 0) {
 		os_free(eapKeyData);
 		wpa_printf(MSG_ERROR,"TEAPv2: could not derive MSK");
 		return NULL;
@@ -2017,7 +2012,8 @@ static u8 * eap_teapv2_get_emsk(struct eap_sm *sm, void *priv, size_t *len)
 	if (!eapKeyData)
 		return NULL;
 
-	if (eap_teapv2_derive_eap_emsk(&data->round_seed, eapKeyData) < 0) {
+	if (eap_teapv2_derive_eap_emsk(data->tls_cs, &data->round_seed,
+				       eapKeyData) < 0) {
 		os_free(eapKeyData);
 		return NULL;
 	}
@@ -2038,28 +2034,18 @@ static bool eap_teapv2_isSuccess(struct eap_sm *sm, void *priv)
 static u8 * eap_teapv2_get_session_id(struct eap_sm *sm, void *priv, size_t *len)
 {
 	struct eap_teapv2_data *data = priv;
-	const size_t max_id_len = 65;
 	u8 *id;
 
 	if (data->state != SUCCESS)
 		return NULL;
 
-	id = os_malloc(max_id_len);
-	if (!id)
-		return NULL;
-
-	id[0] = EAP_TYPE_TEAPV2;
-	/* draft-ietf-emu-teapv2: Session-Id is derived from a TLS exporter so
-	 * that it works with TLS 1.3 (where tls-unique is not defined). */
-	if (tls_connection_export_key(sm->cfg->ssl_ctx, data->ssl.conn,
-				      "EXPORTER: teap session id",
-				      NULL, 0, id + 1, max_id_len - 1) < 0) {
-		os_free(id);
+	id = eap_server_tls_derive_session_id(
+		sm, &data->ssl, EAP_TYPE_TEAPV2, len);
+	if (!id) {
 		wpa_printf(MSG_ERROR, "EAP-TEAPV2: Failed to derive Session-Id");
 		return NULL;
 	}
 
-	*len = max_id_len;
 	wpa_hexdump(MSG_DEBUG, "EAP-TEAPV2: Derived Session-Id", id, *len);
 	return id;
 }

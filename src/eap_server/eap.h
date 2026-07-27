@@ -210,6 +210,8 @@ struct eap_config {
 	int eap_teap_method_sequence;
 	int eap_teapv2_auth;
 	int eap_teapv2_separate_result;
+	int eap_teapv2_test_allow_keyless_inner;
+	int eap_teapv2_test_omit_crypto_binding;
 	enum eap_teapv2_id {
 		EAP_TEAPV2_ID_ALLOW_ANY = 0,
 		EAP_TEAPV2_ID_REQUIRE_USER = 1,
