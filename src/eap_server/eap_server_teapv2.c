@@ -1329,10 +1329,15 @@ static void eap_teapv2_process_basic_auth_resp(struct eap_sm *sm,
 	if (sm->cfg->eap_teapv2_id != EAP_TEAPV2_ID_REQUIRE_USER_AND_MACHINE ||
 	    data->cur_id_type == TEAPV2_IDENTITY_TYPE_MACHINE)
 		data->basic_auth_not_done = 0;
-	if (data->basic_auth_not_done)
+	if (data->basic_auth_not_done) {
 		eap_teapv2_state(data, PHASE2_BASIC_AUTH);
-	else
-		eap_teapv2_state(data, SUCCESS_SEND_RESULT);
+	} else {
+		/* Basic-Password-Auth complete: peer must receive a
+		 * Crypto-Binding TLV so that its RoundKey chain advances in
+		 * lock-step with the server before MSK/EMSK derivation. */
+		data->cb_required = true;
+		eap_teapv2_state(data, CRYPTO_BINDING);
+	}
 	eap_teapv2_update_icmk(sm, data);
 }
 

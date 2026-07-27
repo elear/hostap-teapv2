@@ -1131,9 +1131,11 @@ static struct wpabuf * eap_teapv2_process_basic_auth_req(
 		resp = eap_teapv2_add_identity_type(sm, resp);
 
 	/* Assume this succeeds so that Result TLV(Success) from the server can
-	 * be used to terminate TEAPV2. */
+	 * be used to terminate TEAPV2. Do not clear cb_required here: TEAPv2
+	 * always requires a Crypto-Binding TLV from the server before MSK/EMSK
+	 * derivation so that both endpoints advance the RoundKey chain in
+	 * lock-step. */
 	data->phase2_success = 1;
-	data->cb_required = false;
 
 	return resp;
 }
@@ -1618,13 +1620,9 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 						      tlv.identity_type);
 		if (!tmp)
 			failed = 1;
-		else if (eap_teapv2_derive_msk(data) < 0 ||
-			 	 eap_teapv2_session_id(sm, data) < 0) {
-				wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: Failed to derive keys after basic auth");
-				failed = 1;
-				goto done;
-				}
+		/* Do not derive MSK/EMSK here: TEAPv2 defers keying until
+		 * after the server's Crypto-Binding TLV has been processed so
+		 * that the RoundKey chain has advanced. */
 		resp = wpabuf_concat(resp, tmp);
 	} else if (tlv.eap_payload_tlv) {
 		tmp = eap_teapv2_process_eap_payload_tlv(sm, data, ret,
