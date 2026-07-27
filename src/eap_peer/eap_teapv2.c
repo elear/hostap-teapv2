@@ -1,5 +1,5 @@
 /*
- * EAP peer method: EAP-TEAPV2 (RFC 7170)
+ * EAP peer method: EAP-TEAPV2 (draft-ietf-emu-teapv2)
  * Copyright (c) 2004-2024, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
@@ -52,11 +52,12 @@ struct eap_teapv2_data {
 	u8 emsk[EAP_EMSK_LEN];
 	int success;
 
-	u8 simck[EAP_TEAPV2_SIMCK_LEN];
-	u8 simck_msk[EAP_TEAPV2_SIMCK_LEN];
-	u8 simck_emsk[EAP_TEAPV2_SIMCK_LEN];
-	int simck_idx;
-	bool cmk_emsk_available;
+	/* draft-ietf-emu-teapv2 Section 3.3: RoundSeed for the current inner
+	 * round.  prev_round_key holds either the initial session_key_seed
+	 * (round 0) or RoundKey[j] produced by the previous inner method. */
+	struct teapv2_round_seed round_seed;
+	u8 cmk[EAP_TEAPV2_CMK_LEN];
+	int round_idx;
 	bool pkcs10_requested;
 	bool pkcs7_success;
 	bool cb_required;
@@ -67,11 +68,6 @@ struct eap_teapv2_data {
 	struct wpabuf *pending_resp;
 	struct wpabuf *server_outer_tlvs;
 	struct wpabuf *peer_outer_tlvs;
-
-	enum teapv2_compat { // XXX needs to go.
-		TEAPV2_DEFAULT,
-		TEAPV2_FREERADIUS,
-	} teapv2_compat;
 };
 
 static struct eap_peer_cert_config *
@@ -694,9 +690,6 @@ static void eap_teapv2_parse_phase1(struct eap_teapv2_data *data,
 	if (os_strstr(phase1, "teapv2_test_outer_tlvs=1"))
 		data->test_outer_tlvs = 1;
 #endif /* CONFIG_TESTING_OPTIONS */
-
-	if (os_strstr(phase1, "teapv2_compat=freeradius")) // XXX Needs to go.
-		data->teapv2_compat = TEAPV2_FREERADIUS;
 }
 
 
@@ -732,6 +725,13 @@ static void * eap_teapv2_init(struct eap_sm *sm)
 		return NULL;
 	}
 
+	/* draft-ietf-emu-teapv2 Section 4.2: cap the outbound EAP fragment
+	 * size so the entire EAP packet stays within the 1280-octet TEAPv2
+	 * MTU (leave room for the EAP + TEAPv2 flags/length headers). */
+	if (data->ssl.tls_out_limit == 0 ||
+	    data->ssl.tls_out_limit > EAP_TEAPV2_MAX_LEN - 16)
+		data->ssl.tls_out_limit = EAP_TEAPV2_MAX_LEN - 16;
+
 	return data;
 }
 
@@ -752,9 +752,8 @@ static void eap_teapv2_clear(struct eap_teapv2_data *data)
 	data->peer_outer_tlvs = NULL;
 	wpabuf_free(data->csr_attrs);
 	data->csr_attrs = NULL;
-	forced_memzero(data->simck, EAP_TEAPV2_SIMCK_LEN);
-	forced_memzero(data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
-	forced_memzero(data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
+	forced_memzero(&data->round_seed, sizeof(data->round_seed));
+	forced_memzero(data->cmk, EAP_TEAPV2_CMK_LEN);
 	data->pkcs7_success = false;
 	data->client_authenticated = false;
 	data->cb_required = true;
@@ -779,15 +778,16 @@ static void eap_teapv2_deinit(struct eap_sm *sm, void *priv)
 
 static int eap_teapv2_derive_msk(struct eap_teapv2_data *data)
 {
-	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Derive MSK/EMSK (n=%d)",
-		   data->simck_idx);
-	wpa_hexdump(MSG_DEBUG, "EAP-TEAPV2: S-IMCK[n]", data->simck,
-		    EAP_TEAPV2_SIMCK_LEN);
+	wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Derive MSK/EMSK (round=%d)",
+		   data->round_idx);
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Final RoundSeed",
+			(const u8 *) &data->round_seed,
+			EAP_TEAPV2_ROUNDSEED_LEN);
 
-	if (eap_teapv2_derive_eap_msk(data->tls_cs, data->simck,
-				    data->key_data) < 0 ||
-	    eap_teapv2_derive_eap_emsk(data->tls_cs, data->simck,
-				     data->emsk) < 0)
+	if (eap_teapv2_derive_eap_msk(&data->round_seed,
+				      data->key_data) < 0 ||
+	    eap_teapv2_derive_eap_emsk(&data->round_seed,
+				       data->emsk) < 0)
 		return -1;
 	data->success = 1;
 	return 0;
@@ -799,18 +799,40 @@ static int eap_teapv2_derive_key_auth(struct eap_sm *sm,
 {
 	int res;
 
-	/* RFC 7170, Section 5.1 */
+	/* draft-ietf-emu-teapv2 Section 3.3.1:
+	 *   session_key_seed = TLS-Exporter(
+	 *                          "EXPORTER: teap session key seed", "", 40)
+	 * This becomes PrevRoundKey for the first inner round. */
+	os_memset(&data->round_seed, 0, sizeof(data->round_seed));
 	res = tls_connection_export_key(sm->ssl_ctx, data->ssl.conn,
 					TEAPV2_TLS_EXPORTER_LABEL_SKS, NULL, 0,
-					data->simck, EAP_TEAPV2_SIMCK_LEN);
+					data->round_seed.prev_round_key,
+					EAP_TEAPV2_ROUNDKEY_LEN);
 	if (res)
 		return res;
 	wpa_hexdump_key(MSG_DEBUG,
-			"EAP-TEAPV2: session_key_seed (S-IMCK[0])",
-			data->simck, EAP_TEAPV2_SIMCK_LEN);
-	os_memcpy(data->simck_msk, data->simck, EAP_TEAPV2_SIMCK_LEN);
-	os_memcpy(data->simck_emsk, data->simck, EAP_TEAPV2_SIMCK_LEN);
-	data->simck_idx = 0;
+			"EAP-TEAPV2: session_key_seed (initial PrevRoundKey)",
+			data->round_seed.prev_round_key,
+			EAP_TEAPV2_ROUNDKEY_LEN);
+	data->round_idx = 0;
+	return 0;
+}
+
+
+static int eap_teapv2_update_icmk(struct eap_sm *sm,
+				  struct eap_teapv2_data *data,
+				  const u8 *msk, size_t msk_len,
+				  const u8 *emsk, size_t emsk_len)
+{
+	wpa_printf(MSG_DEBUG,
+		   "EAP-TEAPV2: Deriving RoundKey/CMK for inner round %d",
+		   data->round_idx + 1);
+	if (eap_teapv2_derive_round_key(sm->ssl_ctx, data->ssl.conn,
+					&data->round_seed,
+					msk, msk_len, emsk, emsk_len,
+					data->cmk) < 0)
+		return -1;
+	data->round_idx++;
 	return 0;
 }
 
@@ -1136,10 +1158,12 @@ eap_teapv2_validate_crypto_binding(struct eap_teapv2_data *data,
 	wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: MSK Compound MAC",
 		    cb->msk_compound_mac, sizeof(cb->msk_compound_mac));
 
+	/* draft-ietf-emu-teapv2 Section 3.4: only Flags = 2 (MSK Compound MAC)
+	 * is defined; the EMSK Compound MAC field MUST be zero. */
 	if (cb->version != EAP_TEAPV2_VERSION ||
 	    cb->received_version != data->received_version ||
 	    subtype != TEAPV2_CRYPTO_BINDING_SUBTYPE_REQUEST ||
-	    flags < 1 || flags > 3) {
+	    flags != TEAPV2_CRYPTO_BINDING_MSK_CMAC) {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Invalid Version/Flags/Sub-Type in Crypto-Binding TLV: Version %u Received Version %u Flags %u Sub-Type %u",
 			   cb->version, cb->received_version, flags, subtype);
@@ -1159,8 +1183,7 @@ eap_teapv2_validate_crypto_binding(struct eap_teapv2_data *data,
 static int eap_teapv2_write_crypto_binding(
 	struct eap_teapv2_data *data,
 	struct teapv2_tlv_crypto_binding *rbind,
-	const struct teapv2_tlv_crypto_binding *cb,
-	const u8 *cmk_msk, const u8 *cmk_emsk)
+	const struct teapv2_tlv_crypto_binding *cb)
 {
 	u8 subtype, flags;
 
@@ -1171,27 +1194,19 @@ static int eap_teapv2_write_crypto_binding(
 	rbind->version = EAP_TEAPV2_VERSION;
 	rbind->received_version = data->received_version;
 	subtype = TEAPV2_CRYPTO_BINDING_SUBTYPE_RESPONSE;
-	if (cmk_emsk)
-		flags = TEAPV2_CRYPTO_BINDING_EMSK_CMAC;
-	else if (cmk_msk)
-		flags = TEAPV2_CRYPTO_BINDING_MSK_CMAC;
-	else
-		return -1;
+	/* draft-ietf-emu-teapv2 Section 3.4: Flags MUST be 2 (MSK Compound
+	 * MAC only). */
+	flags = TEAPV2_CRYPTO_BINDING_MSK_CMAC;
 	rbind->subtype = (flags << 4) | subtype;
 	os_memcpy(rbind->nonce, cb->nonce, sizeof(cb->nonce));
 	inc_byte_array(rbind->nonce, sizeof(rbind->nonce));
 	os_memset(rbind->emsk_compound_mac, 0, EAP_TEAPV2_COMPOUND_MAC_LEN);
 	os_memset(rbind->msk_compound_mac, 0, EAP_TEAPV2_COMPOUND_MAC_LEN);
 
-	if (cmk_msk &&
-	    eap_teapv2_compound_mac(data->tls_cs, rbind, data->server_outer_tlvs,
-				  data->peer_outer_tlvs, cmk_msk,
-				  rbind->msk_compound_mac) < 0)
-		return -1;
-	if (cmk_emsk &&
-	    eap_teapv2_compound_mac(data->tls_cs, rbind, data->server_outer_tlvs,
-				  data->peer_outer_tlvs, cmk_emsk,
-				  rbind->emsk_compound_mac) < 0)
+	if (eap_teapv2_compound_mac(data->tls_cs, rbind,
+				    data->server_outer_tlvs,
+				    data->peer_outer_tlvs, data->cmk,
+				    rbind->msk_compound_mac) < 0)
 		return -1;
 
 	wpa_printf(MSG_DEBUG,
@@ -1199,8 +1214,6 @@ static int eap_teapv2_write_crypto_binding(
 		   rbind->version, rbind->received_version, flags, subtype);
 	wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Nonce",
 		    rbind->nonce, sizeof(rbind->nonce));
-	wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: EMSK Compound MAC",
-		    rbind->emsk_compound_mac, sizeof(rbind->emsk_compound_mac));
 	wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: MSK Compound MAC",
 		    rbind->msk_compound_mac, sizeof(rbind->msk_compound_mac));
 
@@ -1208,21 +1221,20 @@ static int eap_teapv2_write_crypto_binding(
 }
 
 
-static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data,
-			    u8 *cmk_msk, u8 *cmk_emsk)
+static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data)
 {
 	u8 *msk = NULL, *emsk = NULL;
 	size_t msk_len = 0, emsk_len = 0;
 	int res;
 
 	wpa_printf(MSG_DEBUG,
-		   "EAP-TEAPV2: Determining CMK[%d] for Compound MAC calculation",
-		   data->simck_idx + 1);
+		   "EAP-TEAPV2: Determining RoundKey/CMK for inner round %d",
+		   data->round_idx + 1);
 
 	if (!data->phase2_method)
 		goto out; /* no MSK derived in Basic-Password-Auth */
 
-	if (!data->phase2_method || !data->phase2_priv) {
+	if (!data->phase2_priv) {
 		wpa_printf(MSG_INFO, "EAP-TEAPV2: Phase 2 method not available");
 		return -1;
 	}
@@ -1252,42 +1264,17 @@ static int eap_teapv2_get_cmk(struct eap_sm *sm, struct eap_teapv2_data *data,
 	}
 
 out:
-	if (data->teapv2_compat == TEAPV2_FREERADIUS) { // XXX should not be in TEAPv2.  One behavior.
-		u8 tmp_simck[EAP_TEAPV2_SIMCK_LEN];
-		u8 tmp_cmk[EAP_TEAPV2_CMK_LEN];
-
-		wpa_printf(MSG_DEBUG,
-			   "EAP-TEAPV2: FreeRADIUS compatibility: use S-IMCK_MSK[j-1] and S-IMCK_EMSK[j-1] based on MSK/EMSK derivations instead of a single selected S-IMCK[j-1]");
-		res = eap_teapv2_derive_imck(data->tls_cs, data->simck_msk,
-					   msk, msk_len, emsk, emsk_len,
-					   data->simck_msk, cmk_msk,
-					   tmp_simck, tmp_cmk);
-		if (emsk)
-			res = eap_teapv2_derive_imck(data->tls_cs,
-						   data->simck_emsk,
-						   msk, msk_len, emsk, emsk_len,
-						   tmp_simck, tmp_cmk,
-						   data->simck_emsk, cmk_emsk);
-	} else {
-		res = eap_teapv2_derive_imck(data->tls_cs, data->simck,
-					   msk, msk_len, emsk, emsk_len,
-					   data->simck_msk, cmk_msk,
-					   data->simck_emsk, cmk_emsk);
-	}
+	res = eap_teapv2_update_icmk(sm, data, msk, msk_len, emsk, emsk_len);
 	bin_clear_free(msk, msk_len);
 	bin_clear_free(emsk, emsk_len);
-	if (res == 0) {
-		data->simck_idx++;
-		data->cmk_emsk_available = emsk != NULL;
-	}
 	return res;
 }
 
 
-static int eap_teapv2_session_id(struct eap_teapv2_data *data)
+static int eap_teapv2_session_id(struct eap_sm *sm,
+				 struct eap_teapv2_data *data)
 {
-	const size_t max_id_len = 100;
-	int res;
+	const size_t max_id_len = 65;
 
 	os_free(data->session_id);
 	data->session_id = os_malloc(max_id_len);
@@ -1295,16 +1282,20 @@ static int eap_teapv2_session_id(struct eap_teapv2_data *data)
 		return -1;
 
 	data->session_id[0] = EAP_TYPE_TEAPV2;
-	res = tls_get_tls_unique(data->ssl.conn, data->session_id + 1,
-				 max_id_len - 1);
-	if (res < 0 || (size_t) res >= max_id_len) {
+	/* draft-ietf-emu-teapv2: Session-Id is derived from a TLS exporter so
+	 * that it works with TLS 1.3 (where tls-unique is not defined). */
+	if (tls_connection_export_key(sm->ssl_ctx, data->ssl.conn,
+				      "EXPORTER: teap session id",
+				      NULL, 0,
+				      data->session_id + 1,
+				      max_id_len - 1) < 0) {
 		os_free(data->session_id);
 		data->session_id = NULL;
 		wpa_printf(MSG_ERROR, "EAP-TEAPV2: Failed to derive Session-Id");
 		return -1;
 	}
 
-	data->id_len = 1 + res;
+	data->id_len = max_id_len;
 	wpa_hexdump(MSG_DEBUG, "EAP-TEAPV2: Derived Session-Id",
 		    data->session_id, data->id_len);
 	return 0;
@@ -1318,74 +1309,31 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 {
 	struct wpabuf *resp;
 	u8 *pos;
-	u8 cmk_msk[EAP_TEAPV2_CMK_LEN];
-	u8 cmk_emsk[EAP_TEAPV2_CMK_LEN];
-	const u8 *cmk_msk_ptr = NULL;
-	const u8 *cmk_emsk_ptr = NULL;
+	u8 msk_compound_mac[EAP_TEAPV2_COMPOUND_MAC_LEN];
 	int res;
 	size_t len;
-	u8 flags;
-	bool server_msk, server_emsk;
 
 	if (eap_teapv2_validate_crypto_binding(data, cb) < 0 ||
-	    eap_teapv2_get_cmk(sm, data, cmk_msk, cmk_emsk) < 0)
+	    eap_teapv2_get_cmk(sm, data) < 0)
 		return NULL;
 
-	/* Validate received MSK/EMSK Compound MAC */
-	flags = cb->subtype >> 4;
-	server_msk = flags == TEAPV2_CRYPTO_BINDING_MSK_CMAC ||
-		flags == TEAPV2_CRYPTO_BINDING_EMSK_AND_MSK_CMAC;
-	server_emsk = flags == TEAPV2_CRYPTO_BINDING_EMSK_CMAC ||
-		flags == TEAPV2_CRYPTO_BINDING_EMSK_AND_MSK_CMAC;
-
-	if (server_msk) {
-		u8 msk_compound_mac[EAP_TEAPV2_COMPOUND_MAC_LEN];
-
-		if (eap_teapv2_compound_mac(data->tls_cs, cb,
-					  data->server_outer_tlvs,
-					  data->peer_outer_tlvs, cmk_msk,
-					  msk_compound_mac) < 0)
-			return NULL;
-		res = os_memcmp_const(msk_compound_mac, cb->msk_compound_mac,
-				      EAP_TEAPV2_COMPOUND_MAC_LEN);
-		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Received MSK Compound MAC",
-			    cb->msk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
-		wpa_hexdump(MSG_MSGDUMP,
-			    "EAP-TEAPV2: Calculated MSK Compound MAC",
-			    msk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
-		if (res != 0) {
-			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: MSK Compound MAC did not match");
-			return NULL;
-		}
-	}
-
-	if (server_emsk && data->cmk_emsk_available) {
-		u8 emsk_compound_mac[EAP_TEAPV2_COMPOUND_MAC_LEN];
-
-		if (eap_teapv2_compound_mac(data->tls_cs, cb,
-					  data->server_outer_tlvs,
-					  data->peer_outer_tlvs, cmk_emsk,
-					  emsk_compound_mac) < 0)
-			return NULL;
-		res = os_memcmp_const(emsk_compound_mac, cb->emsk_compound_mac,
-				      EAP_TEAPV2_COMPOUND_MAC_LEN);
-		wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Received EMSK Compound MAC",
-			    cb->emsk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
-		wpa_hexdump(MSG_MSGDUMP,
-			    "EAP-TEAPV2: Calculated EMSK Compound MAC",
-			    emsk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
-		if (res != 0) {
-			wpa_printf(MSG_INFO,
-				   "EAP-TEAPV2: EMSK Compound MAC did not match");
-			return NULL;
-		}
-	}
-
-	if (flags == TEAPV2_CRYPTO_BINDING_EMSK_CMAC &&
-	    !data->cmk_emsk_available) {
+	/* draft-ietf-emu-teapv2 Section 3.4: only the MSK Compound MAC is
+	 * used; the EMSK Compound MAC field is always zero. */
+	if (eap_teapv2_compound_mac(data->tls_cs, cb,
+				    data->server_outer_tlvs,
+				    data->peer_outer_tlvs, data->cmk,
+				    msk_compound_mac) < 0)
+		return NULL;
+	res = os_memcmp_const(msk_compound_mac, cb->msk_compound_mac,
+			      EAP_TEAPV2_COMPOUND_MAC_LEN);
+	wpa_hexdump(MSG_MSGDUMP, "EAP-TEAPV2: Received MSK Compound MAC",
+		    cb->msk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
+	wpa_hexdump(MSG_MSGDUMP,
+		    "EAP-TEAPV2: Calculated MSK Compound MAC",
+		    msk_compound_mac, EAP_TEAPV2_COMPOUND_MAC_LEN);
+	if (res != 0) {
 		wpa_printf(MSG_INFO,
-			   "EAP-TEAPV2: Server included only EMSK Compound MAC, but no locally generated inner EAP EMSK to validate this");
+			   "EAP-TEAPV2: MSK Compound MAC did not match");
 		return NULL;
 	}
 
@@ -1393,20 +1341,6 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 	 * Compound MAC was valid, so authentication succeeded. Reply with
 	 * crypto binding to allow server to complete authentication.
 	 */
-
-	if (server_emsk && data->cmk_emsk_available) {
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Selected S-IMCK_EMSK");
-		os_memcpy(data->simck, data->simck_emsk, EAP_TEAPV2_SIMCK_LEN);
-		cmk_emsk_ptr = cmk_emsk;
-	} else if (server_msk) {
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: Selected S-IMCK_MSK");
-		os_memcpy(data->simck, data->simck_msk, EAP_TEAPV2_SIMCK_LEN);
-		cmk_msk_ptr = cmk_msk;
-	} else {
-		return NULL;
-	}
-	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Selected S-IMCK[j]",
-			data->simck, EAP_TEAPV2_SIMCK_LEN);
 
 	len = sizeof(struct teapv2_tlv_crypto_binding);
 	resp = wpabuf_alloc(len);
@@ -1422,15 +1356,14 @@ static struct wpabuf * eap_teapv2_process_crypto_binding(
 		return NULL;
 	}
 
-	if (data->phase2_success && eap_teapv2_session_id(data) < 0) {
+	if (data->phase2_success && eap_teapv2_session_id(sm, data) < 0) {
 		wpabuf_free(resp);
 		return NULL;
 	}
 
 	pos = wpabuf_put(resp, sizeof(struct teapv2_tlv_crypto_binding));
 	if (eap_teapv2_write_crypto_binding(
-		    data, (struct teapv2_tlv_crypto_binding *) pos,
-		    cb, cmk_msk_ptr, cmk_emsk_ptr) < 0) {
+		    data, (struct teapv2_tlv_crypto_binding *) pos, cb) < 0) {
 		wpabuf_free(resp);
 		return NULL;
 	}
@@ -1666,7 +1599,7 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 
 		data->pkcs7_success = true;
 		if (eap_teapv2_derive_msk(data) < 0 ||
-		    eap_teapv2_session_id(data) < 0) {
+		    eap_teapv2_session_id(sm, data) < 0) {
 			wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to derive keys after PKCS#7");
 			failed = 1;
@@ -1682,7 +1615,7 @@ static int eap_teapv2_process_decrypted(struct eap_sm *sm,
 		if (!tmp)
 			failed = 1;
 		else if (eap_teapv2_derive_msk(data) < 0 ||
-			 	 eap_teapv2_session_id(data) < 0) {
+			 	 eap_teapv2_session_id(sm, data) < 0) {
 				wpa_printf(MSG_INFO,
 				   "EAP-TEAPV2: Failed to derive keys after basic auth");
 				failed = 1;
@@ -1760,7 +1693,7 @@ done:
 		ret->decision = DECISION_UNCOND_SUCC;
 		if (! data->cb_required ) {
 			if (eap_teapv2_derive_msk(data) < 0 ||
-					eap_teapv2_session_id(data) < 0) {
+					eap_teapv2_session_id(sm, data) < 0) {
 					wpa_printf(MSG_INFO,
 					"EAP-TEAPV2: Failed to derive keys");
 					failed = 1;
@@ -2229,7 +2162,7 @@ static void * eap_teapv2_init_for_reauth(struct eap_sm *sm, void *priv)
 	data->pkcs7_success = false;
 	data->done_on_tx_completion = 0;
 	data->resuming = 1;
-	data->simck_idx = 0;
+	data->round_idx = 0;
 	return priv;
 }
 #endif

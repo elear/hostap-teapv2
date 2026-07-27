@@ -1,5 +1,5 @@
 /*
- * EAP-TEAPV2 definitions (RFC 7170)
+ * EAP-TEAPV2 definitions (draft-ietf-emu-teapv2)
  * Copyright (c) 2004-2019, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
@@ -11,13 +11,32 @@
 
 #define EAP_TEAPV2_VERSION 1
 #define EAP_TEAPV2_KEY_LEN 64
-#define EAP_TEAPV2_IMCK_LEN 60
-#define EAP_TEAPV2_SIMCK_LEN 40
-#define EAP_TEAPV2_CMK_LEN 20
+/*
+ * draft-ietf-emu-teapv2 Section 4.2: TEAPv2 implementations MUST support and
+ * MUST NOT exceed an EAP MTU of 1280 octets.
+ */
+#define EAP_TEAPV2_MAX_LEN 1280
+/*
+ * draft-ietf-emu-teapv2 Section 3.3:
+ *   RoundSeed         = PrevRoundKey[40] || MSK[32] || EMSK[32]   (104 octets)
+ *   DerivedKey        = TLS-Exporter(RoundSeed, 72)               (RoundKey[40] || CMK[32])
+ */
+#define EAP_TEAPV2_ROUNDKEY_LEN 40
+#define EAP_TEAPV2_MSK_HALF_LEN 32
+#define EAP_TEAPV2_EMSK_HALF_LEN 32
+#define EAP_TEAPV2_ROUNDSEED_LEN (EAP_TEAPV2_ROUNDKEY_LEN + \
+				  EAP_TEAPV2_MSK_HALF_LEN + \
+				  EAP_TEAPV2_EMSK_HALF_LEN)
+#define EAP_TEAPV2_CMK_LEN 32
+#define EAP_TEAPV2_DERIVED_KEY_LEN (EAP_TEAPV2_ROUNDKEY_LEN + \
+				    EAP_TEAPV2_CMK_LEN)
 #define EAP_TEAPV2_COMPOUND_MAC_LEN 20
 #define EAP_TEAPV2_NONCE_LEN 32
 
 #define TEAPV2_TLS_EXPORTER_LABEL_SKS "EXPORTER: teap session key seed"
+/* draft-ietf-emu-teapv2 Section 3.3.2 */
+#define TEAPV2_TLS_EXPORTER_LABEL_IMCK \
+	"EXPORTER: TEAPv2 Inner Methods Compound Keys"
 
 #define TLS_EXT_PAC_OPAQUE 35
 
@@ -77,6 +96,14 @@ struct teapv2_tlv_crypto_binding {
 	u8 nonce[EAP_TEAPV2_NONCE_LEN];
 	u8 emsk_compound_mac[EAP_TEAPV2_COMPOUND_MAC_LEN];
 	u8 msk_compound_mac[EAP_TEAPV2_COMPOUND_MAC_LEN];
+} STRUCT_PACKED;
+
+/* draft-ietf-emu-teapv2 Section 3.3.1: RoundSeed used as the context for the
+ * TLS-Exporter that derives the RoundKey and CMK for each inner round. */
+struct teapv2_round_seed {
+	u8 prev_round_key[EAP_TEAPV2_ROUNDKEY_LEN];
+	u8 msk[EAP_TEAPV2_MSK_HALF_LEN];
+	u8 emsk[EAP_TEAPV2_EMSK_HALF_LEN];
 } STRUCT_PACKED;
 
 struct teapv2_tlv_request_action {
@@ -215,13 +242,13 @@ void eap_teapv2_put_tlv(struct wpabuf *buf, u16 type, const void *data, u16 len)
 void eap_teapv2_put_tlv_buf(struct wpabuf *buf, u16 type,
 			  const struct wpabuf *data);
 struct wpabuf * eap_teapv2_tlv_eap_payload(struct wpabuf *buf);
-int eap_teapv2_derive_eap_msk(u16 tls_cs, const u8 *simck, u8 *msk);
-int eap_teapv2_derive_eap_emsk(u16 tls_cs, const u8 *simck, u8 *emsk);
-int eap_teapv2_derive_imck(u16 tls_cs, const u8 *prev_s_imck,
-			 const u8 *msk, size_t msk_len,
-			 const u8 *emsk, size_t emsk_len,
-			 u8 *s_imck_msk, u8 *cmk_msk,
-			 u8 *s_imck_emsk, u8 *cmk_emsk);
+int eap_teapv2_derive_eap_msk(const struct teapv2_round_seed *rs, u8 *msk);
+int eap_teapv2_derive_eap_emsk(const struct teapv2_round_seed *rs, u8 *emsk);
+int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
+				struct teapv2_round_seed *rs,
+				const u8 *msk, size_t msk_len,
+				const u8 *emsk, size_t emsk_len,
+				u8 *cmk);
 int eap_teapv2_compound_mac(u16 tls_cs, const struct teapv2_tlv_crypto_binding *cb,
 			  const struct wpabuf *server_outer_tlvs,
 			  const struct wpabuf *peer_outer_tlvs,

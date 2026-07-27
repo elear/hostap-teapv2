@@ -1,5 +1,5 @@
 /*
- * EAP-TEAPV2 common helper functions (RFC 7170)
+ * EAP-TEAPV2 common helper functions (draft-ietf-emu-teapv2)
  * Copyright (c) 2008-2019, Jouni Malinen <j@w1.fi>
  *
  * This software may be distributed under the terms of the BSD license.
@@ -9,7 +9,6 @@
 #include "includes.h"
 
 #include "common.h"
-#include "crypto/sha1.h"
 #include "crypto/sha256.h"
 #include "crypto/sha384.h"
 #include "crypto/tls.h"
@@ -70,29 +69,16 @@ struct wpabuf * eap_teapv2_tlv_eap_payload(struct wpabuf *buf)
 }
 
 
-static int eap_teapv2_tls_prf(u16 tls_cs, const u8 *secret, size_t secret_len,
-			    const char *label, const u8 *seed, size_t seed_len,
-			    u8 *out, size_t outlen)
-{
-	/* TODO: TLS-PRF for TLSv1.3 */
-	if (tls_cipher_suite_mac_sha384(tls_cs))
-		return tls_prf_sha384(secret, secret_len, label, seed, seed_len,
-				      out, outlen);
-	return tls_prf_sha256(secret, secret_len, label, seed, seed_len,
-			      out, outlen);
-}
-
-
-int eap_teapv2_derive_eap_msk(u16 tls_cs, const u8 *simck, u8 *msk)
+int eap_teapv2_derive_eap_msk(const struct teapv2_round_seed *rs, u8 *msk)
 {
 	/*
-	 * RFC 7170, Section 5.4: EAP Master Session Key Generation
-	 * MSK = TLS-PRF(S-IMCK[j], "Session Key Generating Function", 64)
+	 * draft-ietf-emu-teapv2 Section 3.5:
+	 * MSK = first 64 octets of
+	 *       TLS-PRF(RoundSeed, "Session Key Generating Function")
 	 */
-
-	if (eap_teapv2_tls_prf(tls_cs, simck, EAP_TEAPV2_SIMCK_LEN,
-			     "Session Key Generating Function", (u8 *) "", 0,
-			     msk, EAP_TEAPV2_KEY_LEN) < 0)
+	if (tls_prf_sha256((const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN,
+			   "Session Key Generating Function", (u8 *) "", 0,
+			   msk, EAP_TEAPV2_KEY_LEN) < 0)
 		return -1;
 	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Derived key (MSK)",
 			msk, EAP_TEAPV2_KEY_LEN);
@@ -100,17 +86,16 @@ int eap_teapv2_derive_eap_msk(u16 tls_cs, const u8 *simck, u8 *msk)
 }
 
 
-int eap_teapv2_derive_eap_emsk(u16 tls_cs, const u8 *simck, u8 *emsk)
+int eap_teapv2_derive_eap_emsk(const struct teapv2_round_seed *rs, u8 *emsk)
 {
 	/*
-	 * RFC 7170, Section 5.4: EAP Master Session Key Generation
-	 * EMSK = TLS-PRF(S-IMCK[j],
-	 *        "Extended Session Key Generating Function", 64)
+	 * draft-ietf-emu-teapv2 Section 3.5:
+	 * EMSK = first 64 octets of
+	 *        TLS-PRF(RoundSeed, "Extended Session Key Generating Function")
 	 */
-
-	if (eap_teapv2_tls_prf(tls_cs, simck, EAP_TEAPV2_SIMCK_LEN,
-			     "Extended Session Key Generating Function",
-			     (u8 *) "", 0, emsk, EAP_EMSK_LEN) < 0)
+	if (tls_prf_sha256((const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN,
+			   "Extended Session Key Generating Function",
+			   (u8 *) "", 0, emsk, EAP_EMSK_LEN) < 0)
 		return -1;
 	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Derived key (EMSK)",
 			emsk, EAP_EMSK_LEN);
@@ -118,94 +103,66 @@ int eap_teapv2_derive_eap_emsk(u16 tls_cs, const u8 *simck, u8 *emsk)
 }
 
 
-int eap_teapv2_derive_imck(u16 tls_cs, const u8 *prev_s_imck,
-			 const u8 *msk, size_t msk_len,
-			 const u8 *emsk, size_t emsk_len,
-			 u8 *s_imck_msk, u8 *cmk_msk,
-			 u8 *s_imck_emsk, u8 *cmk_emsk)
+int eap_teapv2_derive_round_key(void *tls_ctx, struct tls_connection *conn,
+				struct teapv2_round_seed *rs,
+				const u8 *msk, size_t msk_len,
+				const u8 *emsk, size_t emsk_len,
+				u8 *cmk)
 {
-	u8 imsk[64], imck[EAP_TEAPV2_IMCK_LEN];
-	int res;
-
 	/*
-	 * RFC 7170, Section 5.2:
-	 * IMSK = First 32 octets of TLS-PRF(EMSK, "TEAPbindkey@ietf.org" |
-	 *                                   "\0" | 64)
-	 * (if EMSK is not available, MSK is used instead; if neither is
-	 * available, IMSK is 32 octets of zeros; MSK is truncated to 32 octets
-	 * or padded to 32 octets, if needed)
-	 * (64 is encoded as a 2-octet field in network byte order)
+	 * draft-ietf-emu-teapv2 Section 3.3.1 - 3.3.3:
 	 *
-	 * S-IMCK[0] = session_key_seed
-	 * IMCK[j] = TLS-PRF(S-IMCK[j-1], "Inner Methods Compound Keys",
-	 *                   IMSK[j], 60)
-	 * S-IMCK[j] = first 40 octets of IMCK[j]
-	 * CMK[j] = last 20 octets of IMCK[j]
+	 *   RoundSeed  = PrevRoundKey[40] || MSK[32] || EMSK[32]
+	 *   DerivedKey = TLS-Exporter(
+	 *                    "EXPORTER: TEAPv2 Inner Methods Compound Keys",
+	 *                    RoundSeed, 72)
+	 *   RoundKey   = first 40 octets of DerivedKey
+	 *   CMK        = last  32 octets of DerivedKey
+	 *
+	 * After DerivedKey is calculated, RoundSeed is updated for the next
+	 * round: RoundKey is copied to PrevRoundKey, MSK/EMSK stay in place.
 	 */
+	u8 derived[EAP_TEAPV2_DERIVED_KEY_LEN];
+	size_t copy_len;
 
-	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: MSK[j]", msk, msk_len);
-	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: EMSK[j]", emsk, emsk_len);
-
-	if (emsk && emsk_len > 0) {
-		u8 context[3];
-
-		context[0] = 0;
-		context[1] = 0;
-		context[2] = 64;
-		if (eap_teapv2_tls_prf(tls_cs, emsk, emsk_len,
-				     "TEAPbindkey@ietf.org",
-				     context, sizeof(context), imsk, 64) < 0)
-			return -1;
-
-		wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: IMSK from EMSK",
-				imsk, 32);
-
-		res = eap_teapv2_tls_prf(tls_cs,
-				       prev_s_imck, EAP_TEAPV2_SIMCK_LEN,
-				       "Inner Methods Compound Keys",
-				       imsk, 32, imck, EAP_TEAPV2_IMCK_LEN);
-		forced_memzero(imsk, sizeof(imsk));
-		if (res < 0)
-			return -1;
-
-		os_memcpy(s_imck_emsk, imck, EAP_TEAPV2_SIMCK_LEN);
-		wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: EMSK S-IMCK[j]",
-				s_imck_emsk, EAP_TEAPV2_SIMCK_LEN);
-		os_memcpy(cmk_emsk, &imck[EAP_TEAPV2_SIMCK_LEN],
-			  EAP_TEAPV2_CMK_LEN);
-		wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: EMSK CMK[j]",
-				cmk_emsk, EAP_TEAPV2_CMK_LEN);
-		forced_memzero(imck, EAP_TEAPV2_IMCK_LEN);
-	}
-
+	/* Fill in MSK/EMSK halves (zero-padded/truncated to 32 octets each). */
+	os_memset(rs->msk, 0, sizeof(rs->msk));
 	if (msk && msk_len > 0) {
-		size_t copy_len = msk_len;
-
-		os_memset(imsk, 0, 32); /* zero pad, if needed */
-		if (copy_len > 32)
-			copy_len = 32;
-		os_memcpy(imsk, msk, copy_len);
-		wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: IMSK from MSK", imsk, 32);
-	} else {
-		os_memset(imsk, 0, 32);
-		wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Zero IMSK", imsk, 32);
+		copy_len = msk_len > sizeof(rs->msk) ? sizeof(rs->msk) : msk_len;
+		os_memcpy(rs->msk, msk, copy_len);
+	}
+	os_memset(rs->emsk, 0, sizeof(rs->emsk));
+	if (emsk && emsk_len > 0) {
+		copy_len = emsk_len > sizeof(rs->emsk) ?
+			sizeof(rs->emsk) : emsk_len;
+		os_memcpy(rs->emsk, emsk, copy_len);
 	}
 
-	res = eap_teapv2_tls_prf(tls_cs, prev_s_imck, EAP_TEAPV2_SIMCK_LEN,
-			       "Inner Methods Compound Keys",
-			       imsk, 32, imck, EAP_TEAPV2_IMCK_LEN);
-	forced_memzero(imsk, sizeof(imsk));
-	if (res < 0)
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: RoundSeed",
+			(const u8 *) rs, EAP_TEAPV2_ROUNDSEED_LEN);
+
+	if (tls_connection_export_key(tls_ctx, conn,
+				      TEAPV2_TLS_EXPORTER_LABEL_IMCK,
+				      (const u8 *) rs,
+				      EAP_TEAPV2_ROUNDSEED_LEN,
+				      derived,
+				      EAP_TEAPV2_DERIVED_KEY_LEN) < 0) {
+		wpa_printf(MSG_INFO,
+			   "EAP-TEAPV2: TLS-Exporter for RoundKey/CMK failed");
 		return -1;
+	}
 
-	os_memcpy(s_imck_msk, imck, EAP_TEAPV2_SIMCK_LEN);
-	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: MSK S-IMCK[j]",
-			s_imck_msk, EAP_TEAPV2_SIMCK_LEN);
-	os_memcpy(cmk_msk, &imck[EAP_TEAPV2_SIMCK_LEN], EAP_TEAPV2_CMK_LEN);
-	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: MSK CMK[j]",
-			cmk_msk, EAP_TEAPV2_CMK_LEN);
-	forced_memzero(imck, EAP_TEAPV2_IMCK_LEN);
+	os_memcpy(cmk, derived + EAP_TEAPV2_ROUNDKEY_LEN,
+		  EAP_TEAPV2_CMK_LEN);
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: CMK",
+			cmk, EAP_TEAPV2_CMK_LEN);
 
+	/* Update RoundSeed for the next round (Section 3.3.3). */
+	os_memcpy(rs->prev_round_key, derived, EAP_TEAPV2_ROUNDKEY_LEN);
+	wpa_hexdump_key(MSG_DEBUG, "EAP-TEAPV2: Updated PrevRoundKey",
+			rs->prev_round_key, EAP_TEAPV2_ROUNDKEY_LEN);
+
+	forced_memzero(derived, sizeof(derived));
 	return 0;
 }
 
@@ -220,27 +177,6 @@ static int tls_cipher_suite_match(const u16 *list, size_t count, u16 cs)
 	}
 
 	return 0;
-}
-
-
-static int tls_cipher_suite_mac_sha1(u16 cs)
-{
-	static const u16 sha1_cs[] = {
-		0x0005, 0x0007, 0x000a, 0x000d, 0x0010, 0x0013, 0x0016, 0x001b,
-		0x002f, 0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036,
-		0x0037, 0x0038, 0x0039, 0x003a, 0x0041, 0x0042, 0x0043, 0x0044,
-		0x0045, 0x0046, 0x0084, 0x0085, 0x0086, 0x0087, 0x0088, 0x0089,
-		0x008a, 0x008b, 0x008c, 0x008d, 0x008e, 0x008f, 0x0090, 0x0091,
-		0x0092, 0x0093, 0x0094, 0x0095, 0x0096, 0x0097, 0x0098, 0x0099,
-		0x009a, 0x009b,
-		0xc002, 0xc003, 0xc004, 0xc005, 0xc007, 0xc008, 0xc009, 0xc009,
-		0xc00a, 0xc00c, 0xc00d, 0xc00e, 0xc00f, 0xc011, 0xc012, 0xc013,
-		0xc014, 0xc016, 0xc017, 0xc018, 0xc019, 0xc01a, 0xc01b, 0xc01c,
-		0xc014, 0xc01e, 0xc01f, 0xc020, 0xc021, 0xc022, 0xc033, 0xc034,
-		0xc035, 0xc036
-	};
-
-	return tls_cipher_suite_match(sha1_cs, ARRAY_SIZE(sha1_cs), cs);
 }
 
 
@@ -299,15 +235,14 @@ static int eap_teapv2_tls_mac(u16 tls_cs, const u8 *cmk, size_t cmk_len,
 	os_memset(tmp, 0, sizeof(tmp));
 	os_memset(mac, 0, mac_len);
 
-	if (tls_cipher_suite_mac_sha1(tls_cs)) {
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: MAC algorithm: HMAC-SHA1");
-		res = hmac_sha1(cmk, cmk_len, buffer, buffer_len, tmp);
+	/* draft-ietf-emu-teapv2 requires TLS 1.3, so only SHA-256 and SHA-384
+	 * MAC algorithms need to be supported here. */
+	if (tls_cipher_suite_mac_sha384(tls_cs)) {
+		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: MAC algorithm: HMAC-SHA384");
+		res = hmac_sha384(cmk, cmk_len, buffer, buffer_len, tmp);
 	} else if (tls_cipher_suite_mac_sha256(tls_cs)) {
 		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: MAC algorithm: HMAC-SHA256");
 		res = hmac_sha256(cmk, cmk_len, buffer, buffer_len, tmp);
-	} else if (tls_cipher_suite_mac_sha384(tls_cs)) {
-		wpa_printf(MSG_DEBUG, "EAP-TEAPV2: MAC algorithm: HMAC-SHA384");
-		res = hmac_sha384(cmk, cmk_len, buffer, buffer_len, tmp);
 	} else {
 		wpa_printf(MSG_INFO,
 			   "EAP-TEAPV2: Unsupported TLS cipher suite 0x%04x",
@@ -334,7 +269,7 @@ int eap_teapv2_compound_mac(u16 tls_cs, const struct teapv2_tlv_crypto_binding *
 	struct teapv2_tlv_crypto_binding *tmp_cb;
 	int res;
 
-	/* RFC 7170, Section 5.3 */
+	/* draft-ietf-emu-teapv2 Section 3.4 (Compound MAC) */
 	bind_len = sizeof(struct teapv2_tlv_hdr) + be_to_host16(cb->length);
 	buffer_len = bind_len + 1;
 	if (server_outer_tlvs)

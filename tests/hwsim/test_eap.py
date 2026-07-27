@@ -1269,7 +1269,7 @@ def test_eap_teapv2_errors(dev, apdev):
              (1, "eap_teapv2_process_crypto_binding"),
              (1, "eap_teapv2_derive_msk;eap_teapv2_process_crypto_binding"),
              (1, "eap_teapv2_compound_mac;eap_teapv2_process_crypto_binding"),
-             (1, "eap_teapv2_derive_imck")]
+             (1, "eap_teapv2_derive_round_key")]
     for count, func in tests:
         with fail_test(dev[0], count, func):
             dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP",
