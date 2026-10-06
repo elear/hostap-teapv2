@@ -953,6 +953,12 @@ SM_STATE(EAP, METHOD)
 		eap_sm_free_key(sm);
 		sm->eapKeyData = sm->m->getKey(sm, sm->eap_method_priv,
 					       &sm->eapKeyDataLen);
+#ifdef CONFIG_EAP_TEAPV2
+		if (sm->eapKeyData)
+			wpa_printf(MSG_DEBUG,
+				   "EAP: Keying material available (len=%zu)",
+				   sm->eapKeyDataLen);
+#endif /* CONFIG_EAP_TEAPV2 */
 		os_free(sm->eapSessionId);
 		sm->eapSessionId = NULL;
 		if (sm->m->getSessionId) {
@@ -2702,6 +2708,10 @@ static int eap_allowed_phase2_type(int vendor, int type)
 		return 1;
 	if (vendor != EAP_VENDOR_IETF)
 		return 0;
+#ifdef CONFIG_EAP_TEAPV2
+	if (type == EAP_TYPE_TEAPV2)
+		return 0;
+#endif /* CONFIG_EAP_TEAPV2 */
 	return type != EAP_TYPE_PEAP && type != EAP_TYPE_TTLS &&
 		type != EAP_TYPE_FAST && type != EAP_TYPE_TEAP;
 }

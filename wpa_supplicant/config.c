@@ -2811,6 +2811,10 @@ static const struct parse_data ssid_fields[] = {
 	{ STRe(domain_suffix_match2, phase2_cert.domain_suffix_match) },
 	{ STRe(domain_match2, phase2_cert.domain_match) },
 	{ STRe(phase1, phase1) },
+#ifdef CONFIG_EAP_TEAPV2
+	{ INTe(teapv2_ignore_request_action_pkcs10,
+	       teapv2_ignore_request_action_pkcs10) },
+#endif /* CONFIG_EAP_TEAPV2 */
 	{ STRe(phase2, phase2) },
 	{ STRe(machine_phase2, machine_phase2) },
 	{ STRe(pcsc, pcsc) },

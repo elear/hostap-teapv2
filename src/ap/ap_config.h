@@ -439,6 +439,10 @@ struct hostapd_bss_config {
 	char *private_key2;
 	char *private_key_passwd;
 	char *private_key_passwd2;
+#ifdef CONFIG_EAP_TEAPV2
+	char *teapv2_pkcs7_cert;
+	char *teapv2_pkcs7_key;
+#endif /* CONFIG_EAP_TEAPV2 */
 	char *check_cert_subject;
 	int check_crl;
 	int check_crl_strict;
@@ -463,6 +467,20 @@ struct hostapd_bss_config {
 	int eap_teap_separate_result;
 	int eap_teap_id;
 	int eap_teap_method_sequence;
+#ifdef CONFIG_EAP_TEAPV2
+	int eap_teapv2_auth;
+	int eap_teapv2_separate_result;
+	int eap_teapv2_test_allow_keyless_inner;
+	int eap_teapv2_test_omit_crypto_binding;
+	int eap_teapv2_test_invalid_crypto_binding;
+	char *eap_teapv2_test_tlv;
+	int eap_teapv2_id;
+	int eap_teapv2_method_sequence;
+	int eap_teapv2_request_action_pkcs10;
+	int eap_teapv2_request_action_pkcs10_untrusted;
+	char *eap_teapv2_trusted_server_root;
+	char *eap_teapv2_csrattrs;
+#endif /* CONFIG_EAP_TEAPV2 */
 	int eap_sim_aka_result_ind;
 	int eap_sim_id;
 	char *imsi_privacy_key;
