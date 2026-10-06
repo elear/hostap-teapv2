@@ -1152,8 +1152,10 @@ class WpaSupplicant:
                       "pmksa_privacy",
                       "eap_over_auth_frame",
                       "security_profiles",
+                      "teapv2_ignore_request_action_pkcs10",
                       "disable_pmksa_caching",
                       "disable_uhr"]
+
         for field in not_quoted:
             if field in kwargs and kwargs[field]:
                 self.set_network(id, field, kwargs[field])

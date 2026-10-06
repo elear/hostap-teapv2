@@ -100,6 +100,11 @@ int eap_register_methods(void)
 		ret = eap_peer_teap_register();
 #endif /* EAP_TEAP */
 
+#ifdef EAP_TEAPV2
+	if (ret == 0)
+		ret = eap_peer_teapv2_register();
+#endif /* EAP_TEAPV2 */
+
 #ifdef EAP_PAX
 	if (ret == 0)
 		ret = eap_peer_pax_register();
@@ -239,6 +244,11 @@ int eap_register_methods(void)
 	if (ret == 0)
 		ret = eap_server_teap_register();
 #endif /* EAP_SERVER_TEAP */
+
+#ifdef EAP_SERVER_TEAPV2
+	if (ret == 0)
+		ret = eap_server_teapv2_register();
+#endif /* EAP_SERVER_TEAPV2 */
 
 #ifdef EAP_SERVER_WSC
 	if (ret == 0)

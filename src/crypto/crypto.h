@@ -1205,6 +1205,9 @@ struct crypto_csr;
 enum crypto_csr_name {
 	CSR_NAME_CN,
 	CSR_NAME_SN,
+#ifdef CONFIG_EAP_TEAPV2
+	CSR_NAME_SERIAL_NUMBER,
+#endif /* CONFIG_EAP_TEAPV2 */
 	CSR_NAME_C,
 	CSR_NAME_O,
 	CSR_NAME_OU,
